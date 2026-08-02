@@ -1,13 +1,12 @@
-# 🐍 TaskPulse AI (Python/FastAPI) - Steps to Run
+# 🐍 TaskPulse AI (Python/FastAPI) - Steps to Run on Any System
 
-Follow these step-by-step instructions to set up and run the Python/FastAPI version of **TaskPulse AI**.
+Follow these step-by-step instructions to set up and run the Python/FastAPI version of **TaskPulse AI** on any Windows/Mac/Linux computer.
 
 ---
 
 ## 📋 Prerequisites
-- **Python 3.10+** installed on your system.
+- **Python 3.10+** installed on your system ([python.org/downloads](https://www.python.org/downloads/)).
 - **Git** installed on your system.
-- **FFmpeg** installed (optional, for non-WAV media conversion).
 
 ---
 
@@ -36,14 +35,14 @@ cd tm-python
 pip install -r requirements.txt
 ```
 
-### 4️⃣ Configure Environment Variables (Optional for Gemini AI)
-Create a `.env` file in the root directory or set your Gemini API key inside the UI Settings:
+### 4️⃣ Set Your Gemini API Key (Optional for AI Notes)
+Create a `.env` file in the root directory OR input your Gemini API Key in the UI Settings tab:
 ```env
 GEMINI_API_KEY=your_google_gemini_api_key_here
 PORT=8000
 ```
 
-### 5️⃣ Run the Python FastAPI Server
+### 5️⃣ Run the Application
 ```bash
 python main.py
 ```
@@ -56,9 +55,6 @@ Open your web browser and navigate to:
 
 ---
 
-## 🎯 Main Application Features
-1. **💻 Desktop Dual Audio Mode**: Record both your Microphone and System Speaker Audio (Zoom, Teams, Meet, YouTube) using Windows WASAPI soundcards.
-2. **🌐 Web Browser Mode**: Record directly using HTML5 WebAudio.
-3. **📁 Media File Uploader**: Upload `.mp3`, `.wav`, `.mp4`, or `.webm` files for transcription and note generation.
-4. **📊 Summary & Insights**: Executive summaries, topics discussed, and full timestamped transcripts in English, Hindi, Hinglish, Spanish, French, or German.
-5. **📋 Kanban Action Task Board**: Filter action items by status (*To Do*, *In Progress*, *Done*) and priority (*High*, *Medium*, *Low*).
+## 🔧 Troubleshooting on New Systems:
+- **No Soundcards Listed**: Ensure your microphone is plugged in and granted privacy permissions in Windows Settings (*Settings > Privacy & Security > Microphone > Allow desktop apps to access your microphone*).
+- **Speech Recognition Error**: Ensure you have an active internet connection for Google Speech Recognition API.
