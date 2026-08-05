@@ -73,6 +73,15 @@ def get_gemini_api_key():
     settings = load_json_file(SETTINGS_FILE, {})
     return settings.get("gemini_api_key", None)
 
+def get_analyzer():
+    settings = load_json_file(SETTINGS_FILE, {})
+    g_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    gr_key = settings.get("groq_api_key") or os.environ.get("GROQ_API_KEY")
+    o_key = settings.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
+    ol_host = settings.get("ollama_host") or os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+    prov = settings.get("ai_provider", "auto")
+    return MeetingAnalyzer(api_key=g_key, groq_api_key=gr_key, openai_api_key=o_key, ollama_host=ol_host, default_provider=prov)
+
 # --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
@@ -127,9 +136,8 @@ async def stop_recording(meeting_title: str = Form("Live Recorded Meeting"), tar
         transcript_text = transcribe_res.get("text", "")
         segments = transcribe_res.get("segments", [])
 
-    # 2. Meeting Analysis (Summary + Items Discussed + Action Tasks)
-    api_key = get_gemini_api_key()
-    analyzer = MeetingAnalyzer(api_key=api_key)
+    # 2. Meeting Analysis (Multi-provider AI)
+    analyzer = get_analyzer()
     analysis = analyzer.analyze_meeting(transcript_text, meeting_title=meeting_title, target_language=target_language)
 
     meeting_id = str(uuid.uuid4())[:8]
@@ -196,9 +204,8 @@ async def stop_web_recording(
     transcript_text = transcribe_res.get("text", "")
     segments = transcribe_res.get("segments", [])
 
-    # Gemini / Local NLP Meeting Analysis
-    api_key = get_gemini_api_key()
-    analyzer = MeetingAnalyzer(api_key=api_key)
+    # 2. Meeting Analysis (Multi-provider AI)
+    analyzer = get_analyzer()
     analysis = analyzer.analyze_meeting(transcript_text, meeting_title=meeting_title, target_language=target_language)
 
     meeting_id = str(uuid.uuid4())[:8]
@@ -439,13 +446,20 @@ async def delete_task(task_id: str):
 @app.get("/api/settings")
 async def get_settings():
     settings = load_json_file(SETTINGS_FILE, {})
-    return {"gemini_api_key": settings.get("gemini_api_key", "")}
+    return {
+        "ai_provider": settings.get("ai_provider", "auto"),
+        "gemini_api_key": settings.get("gemini_api_key", ""),
+        "groq_api_key": settings.get("groq_api_key", ""),
+        "openai_api_key": settings.get("openai_api_key", ""),
+        "ollama_host": settings.get("ollama_host", "http://localhost:11434")
+    }
 
 @app.post("/api/settings")
 async def update_settings(payload: dict):
     settings = load_json_file(SETTINGS_FILE, {})
-    if "gemini_api_key" in payload:
-        settings["gemini_api_key"] = payload["gemini_api_key"]
+    for k in ["ai_provider", "gemini_api_key", "groq_api_key", "openai_api_key", "ollama_host"]:
+        if k in payload:
+            settings[k] = payload[k]
     save_json_file(SETTINGS_FILE, settings)
     return {"status": "saved"}
 
