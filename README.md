@@ -2,18 +2,27 @@
 
 TaskPulse AI is an intelligent meeting session recorder, speech-to-text transcriber, executive summary generator, and Kanban action task extractor powered by Python, FastAPI, WASAPI Dual Audio capture, and Google Gemini AI.
 
-## Features
-- **WASAPI Desktop Soundcard Dual Audio**: Capture both Microphone and System Speaker Audio (Zoom, Teams, Meet, YouTube).
-- **Multi-language Support**: Summaries & Action Items in English, Hindi (Devanagari), Hinglish, Spanish, French, and German.
-- **Kanban Task Board**: Extract action items automatically with Priority, Assignee, and Due Date.
-- **REST APIs**: FastAPI endpoints for meetings, tasks, settings, and media uploads.
+## 📦 How to Install Python Packages & Run
 
-## Running Locally
+### 1. Clone & Setup Virtual Environment
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+git clone https://github.com/projectdeveloperyogesh/tm-python.git
+cd tm-python
 
-# 2. Run FastAPI server
+python -m venv .venv
+```
+
+### 2. Activate Virtual Environment & Install Packages
+- **Windows**: `.venv\Scripts\activate`
+- **macOS/Linux**: `source .venv/bin/activate`
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Start Server
+```bash
 python main.py
 ```
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
+See [STEPS_TO_RUN.md](STEPS_TO_RUN.md) for full guide.
