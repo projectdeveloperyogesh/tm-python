@@ -454,6 +454,57 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        const muteMicBtn = document.getElementById('muteMicBtn');
+        const muteSpeakerBtn = document.getElementById('muteSpeakerBtn');
+
+        if (muteMicBtn) {
+            muteMicBtn.addEventListener('click', async () => {
+                state.isMicMuted = !state.isMicMuted;
+                if (state.isMicMuted) {
+                    muteMicBtn.innerHTML = '<i data-lucide="mic-off"></i> Mic Muted';
+                    muteMicBtn.classList.remove('btn-secondary');
+                    muteMicBtn.classList.add('btn-danger');
+                } else {
+                    muteMicBtn.innerHTML = '<i data-lucide="mic"></i> Mic On';
+                    muteMicBtn.classList.remove('btn-danger');
+                    muteMicBtn.classList.add('btn-secondary');
+                }
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('target', 'mic');
+                    await fetch('/api/record/mute', { method: 'POST', body: formData });
+                } catch (e) {
+                    console.error(e);
+                }
+                lucide.createIcons();
+            });
+        }
+
+        if (muteSpeakerBtn) {
+            muteSpeakerBtn.addEventListener('click', async () => {
+                state.isSpeakerMuted = !state.isSpeakerMuted;
+                if (state.isSpeakerMuted) {
+                    muteSpeakerBtn.innerHTML = '<i data-lucide="volume-x"></i> Speaker Muted';
+                    muteSpeakerBtn.classList.remove('btn-secondary');
+                    muteSpeakerBtn.classList.add('btn-danger');
+                } else {
+                    muteSpeakerBtn.innerHTML = '<i data-lucide="volume-2"></i> Speaker On';
+                    muteSpeakerBtn.classList.remove('btn-danger');
+                    muteSpeakerBtn.classList.add('btn-secondary');
+                }
+
+                try {
+                    const formData = new FormData();
+                    formData.append('target', 'speaker');
+                    await fetch('/api/record/mute', { method: 'POST', body: formData });
+                } catch (e) {
+                    console.error(e);
+                }
+                lucide.createIcons();
+            });
+        }
+
         stopRecordBtn.addEventListener('click', async () => {
             if (!state.isRecording) {
                 alert('No active recording session is currently running. Please click "Start Recording" first.');

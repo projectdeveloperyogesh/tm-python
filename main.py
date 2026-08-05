@@ -98,6 +98,11 @@ async def pause_recording():
     """Toggle pause/resume on recording."""
     return recorder.pause_recording()
 
+@app.post("/api/record/mute")
+async def toggle_mute(target: str = Form(...)):
+    """Toggle mute status for a specific stream."""
+    return recorder.toggle_mute(target=target)
+
 @app.post("/api/record/stop")
 async def stop_recording(meeting_title: str = Form("Live Recorded Meeting"), target_language: str = Form("English")):
     """Stop recording, transcribe locally, generate summary, items discussed, & tasks in target language."""
