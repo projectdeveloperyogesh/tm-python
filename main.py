@@ -453,6 +453,11 @@ async def get_ollama_status():
         "models": models
     }
 
+@app.get("/api/ollama/progress")
+async def get_ollama_progress():
+    from ollama_installer import get_ollama_progress
+    return get_ollama_progress()
+
 @app.post("/api/ollama/setup")
 async def setup_ollama(model_name: str = Form("llama3.2")):
     from ollama_installer import auto_setup_ollama
