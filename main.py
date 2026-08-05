@@ -443,6 +443,21 @@ async def delete_task(task_id: str):
     save_json_file(TASKS_FILE, filtered_tasks)
     return {"status": "deleted", "task_id": task_id}
 
+@app.get("/api/ollama/status")
+async def get_ollama_status():
+    from ollama_installer import is_ollama_running, get_installed_models
+    running = is_ollama_running()
+    models = get_installed_models() if running else []
+    return {
+        "running": running,
+        "models": models
+    }
+
+@app.post("/api/ollama/setup")
+async def setup_ollama(model_name: str = Form("llama3.2")):
+    from ollama_installer import auto_setup_ollama
+    return auto_setup_ollama(model_name=model_name)
+
 @app.get("/api/settings")
 async def get_settings():
     settings = load_json_file(SETTINGS_FILE, {})
