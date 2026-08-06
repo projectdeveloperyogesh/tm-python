@@ -119,7 +119,7 @@ async def list_jobs():
     """List all background processing jobs."""
     return get_all_jobs()
 
-@app.get("/api/jobs/{job_id}")
+@app.get("/api/job/{job_id}")
 async def get_job_status(job_id: str):
     job = get_job(job_id)
     if not job:
@@ -194,32 +194,6 @@ async def stop_web_recording(
         "status": "background_processing",
         "message": "Browser audio uploaded! Processing session in background.",
         "job": job
-    }
-        "transcript": transcript_text,
-        "segments": segments,
-        "summary": analysis.get("summary", ""),
-        "items_discussed": analysis.get("items_discussed", []),
-        "task_count": len(analysis.get("tasks", []))
-    }
-
-    # Save meeting
-    meetings = load_json_file(MEETINGS_FILE, [])
-    meetings.insert(0, meeting_obj)
-    save_json_file(MEETINGS_FILE, meetings)
-
-    # Save tasks
-    existing_tasks = load_json_file(TASKS_FILE, [])
-    new_tasks = analysis.get("tasks", [])
-    for task in new_tasks:
-        task["meeting_id"] = meeting_id
-        task["language"] = target_language
-        existing_tasks.insert(0, task)
-    save_json_file(TASKS_FILE, existing_tasks)
-
-    return {
-        "status": "success",
-        "meeting": meeting_obj,
-        "tasks": new_tasks
     }
 
 @app.get("/api/record/status")
