@@ -112,69 +112,48 @@ async def toggle_mute(target: str = Form(...)):
     """Toggle mute status for a specific stream."""
     return recorder.toggle_mute(target=target)
 
+from background_job_manager import dispatch_background_meeting, get_all_jobs, get_job
+
+@app.get("/api/jobs")
+async def list_jobs():
+    """List all background processing jobs."""
+    return get_all_jobs()
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
 @app.post("/api/record/stop")
 async def stop_recording(meeting_title: str = Form("Live Recorded Meeting"), target_language: str = Form("English")):
-    """Stop recording, transcribe locally, generate summary, items discussed, & tasks in target language."""
+    """Stop recording, release recorder immediately, and dispatch processing to background thread."""
     stop_result = recorder.stop_recording()
     filepath = stop_result.get("filepath")
     
     if not filepath or not os.path.exists(filepath):
         raise HTTPException(status_code=400, detail="No active desktop recording session found. Please click 'Start Recording' first.")
 
-    # 1. Local Transcription
     live_trans = stop_result.get("live_transcript", [])
-    if live_trans and len(live_trans) > 0:
-        transcript_text = " ".join([t["text"] for t in live_trans if t.get("text")])
-        segments = [{
-            "start": t.get("time", "00:00"),
-            "end": t.get("time", "00:00"),
-            "speaker": t.get("speaker", "Participant"),
-            "text": t.get("text", "")
-        } for t in live_trans]
-    else:
-        transcribe_res = speech_engine.transcribe_audio(filepath)
-        transcript_text = transcribe_res.get("text", "")
-        segments = transcribe_res.get("segments", [])
 
-    # 2. Meeting Analysis (Multi-provider AI)
-    analyzer = get_analyzer()
-    analysis = analyzer.analyze_meeting(transcript_text, meeting_title=meeting_title, target_language=target_language)
-
-    meeting_id = str(uuid.uuid4())[:8]
-    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    meeting_obj = {
-        "id": meeting_id,
-        "title": meeting_title,
-        "language": target_language,
-        "created_at": created_at,
-        "audio_url": f"/recordings/{os.path.basename(filepath)}",
-        "audio_filename": os.path.basename(filepath),
-        "transcript": transcript_text,
-        "segments": segments,
-        "summary": analysis.get("summary", ""),
-        "items_discussed": analysis.get("items_discussed", []),
-        "task_count": len(analysis.get("tasks", []))
-    }
-
-    # Save to meetings store
-    meetings = load_json_file(MEETINGS_FILE, [])
-    meetings.insert(0, meeting_obj)
-    save_json_file(MEETINGS_FILE, meetings)
-
-    # Save extracted tasks to tasks store
-    existing_tasks = load_json_file(TASKS_FILE, [])
-    new_tasks = analysis.get("tasks", [])
-    for task in new_tasks:
-        task["meeting_id"] = meeting_id
-        task["language"] = target_language
-        existing_tasks.insert(0, task)
-    save_json_file(TASKS_FILE, existing_tasks)
+    job = dispatch_background_meeting(
+        filepath=filepath,
+        meeting_title=meeting_title,
+        target_language=target_language,
+        live_trans=live_trans,
+        speech_engine=speech_engine,
+        get_analyzer_func=get_analyzer,
+        load_json_func=load_json_file,
+        save_json_func=save_json_file,
+        meetings_file=MEETINGS_FILE,
+        tasks_file=TASKS_FILE
+    )
 
     return {
-        "status": "success",
-        "meeting": meeting_obj,
-        "tasks": new_tasks
+        "status": "background_processing",
+        "message": "Recording released! Processing session in background.",
+        "job": job
     }
 
 @app.post("/api/record/stop_web")
@@ -196,28 +175,26 @@ async def stop_web_recording(
         content = await file.read()
         f.write(content)
 
-    # Process and convert to standard 16kHz WAV
     processed_wav = media_processor.process_media_file(upload_filepath)
 
-    # Speech Transcription
-    transcribe_res = speech_engine.transcribe_audio(processed_wav)
-    transcript_text = transcribe_res.get("text", "")
-    segments = transcribe_res.get("segments", [])
+    job = dispatch_background_meeting(
+        filepath=processed_wav,
+        meeting_title=meeting_title,
+        target_language=target_language,
+        live_trans=[],
+        speech_engine=speech_engine,
+        get_analyzer_func=get_analyzer,
+        load_json_func=load_json_file,
+        save_json_func=save_json_file,
+        meetings_file=MEETINGS_FILE,
+        tasks_file=TASKS_FILE
+    )
 
-    # 2. Meeting Analysis (Multi-provider AI)
-    analyzer = get_analyzer()
-    analysis = analyzer.analyze_meeting(transcript_text, meeting_title=meeting_title, target_language=target_language)
-
-    meeting_id = str(uuid.uuid4())[:8]
-    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    meeting_obj = {
-        "id": meeting_id,
-        "title": meeting_title,
-        "language": target_language,
-        "created_at": created_at,
-        "audio_url": f"/recordings/{saved_filename}",
-        "audio_filename": saved_filename,
+    return {
+        "status": "background_processing",
+        "message": "Browser audio uploaded! Processing session in background.",
+        "job": job
+    }
         "transcript": transcript_text,
         "segments": segments,
         "summary": analysis.get("summary", ""),
@@ -252,7 +229,7 @@ async def recording_status():
 
 @app.post("/api/upload")
 async def upload_media(file: UploadFile = File(...), meeting_title: str = Form("Uploaded Media Meeting"), target_language: str = Form("English")):
-    """Upload Audio or Video file, process audio, transcribe locally, and generate insights."""
+    """Upload Audio or Video file, process audio, transcribe locally, and generate insights in background thread."""
     file_ext = os.path.splitext(file.filename)[1].lower()
     allowed_exts = [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".mp4", ".mkv", ".avi", ".webm", ".mov"]
     
@@ -263,59 +240,29 @@ async def upload_media(file: UploadFile = File(...), meeting_title: str = Form("
     saved_filename = f"upload_{timestamp}_{file.filename}"
     upload_filepath = os.path.join(UPLOADS_DIR, saved_filename)
 
-    # Save uploaded file
     with open(upload_filepath, "wb") as f:
         content = await file.read()
         f.write(content)
 
-    # Process and convert to audio WAV
     processed_wav = media_processor.process_media_file(upload_filepath)
 
-    # Local Speech Transcription
-    transcribe_res = speech_engine.transcribe_audio(processed_wav)
-    transcript_text = transcribe_res.get("text", "")
-    segments = transcribe_res.get("segments", [])
-
-    # Meeting Analysis
-    api_key = get_gemini_api_key()
-    analyzer = MeetingAnalyzer(api_key=api_key)
-    analysis = analyzer.analyze_meeting(transcript_text, meeting_title=meeting_title if meeting_title else file.filename, target_language=target_language)
-
-    meeting_id = str(uuid.uuid4())[:8]
-    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    meeting_obj = {
-        "id": meeting_id,
-        "title": meeting_title if meeting_title else file.filename,
-        "language": target_language,
-        "created_at": created_at,
-        "audio_url": f"/uploads/{saved_filename}",
-        "audio_filename": file.filename,
-        "transcript": transcript_text,
-        "segments": segments,
-        "summary": analysis.get("summary", ""),
-        "items_discussed": analysis.get("items_discussed", []),
-        "task_count": len(analysis.get("tasks", []))
-    }
-
-    # Save meeting
-    meetings = load_json_file(MEETINGS_FILE, [])
-    meetings.insert(0, meeting_obj)
-    save_json_file(MEETINGS_FILE, meetings)
-
-    # Save tasks
-    existing_tasks = load_json_file(TASKS_FILE, [])
-    new_tasks = analysis.get("tasks", [])
-    for task in new_tasks:
-        task["meeting_id"] = meeting_id
-        task["language"] = target_language
-        existing_tasks.insert(0, task)
-    save_json_file(TASKS_FILE, existing_tasks)
+    job = dispatch_background_meeting(
+        filepath=processed_wav,
+        meeting_title=meeting_title if meeting_title else file.filename,
+        target_language=target_language,
+        live_trans=[],
+        speech_engine=speech_engine,
+        get_analyzer_func=get_analyzer,
+        load_json_func=load_json_file,
+        save_json_func=save_json_file,
+        meetings_file=MEETINGS_FILE,
+        tasks_file=TASKS_FILE
+    )
 
     return {
-        "status": "success",
-        "meeting": meeting_obj,
-        "tasks": new_tasks
+        "status": "background_processing",
+        "message": f"Media file '{file.filename}' uploaded! Processing in background.",
+        "job": job
     }
 
 @app.post("/api/meetings/{meeting_id}/reanalyze")
