@@ -160,13 +160,13 @@ async def stop_recording(meeting_title: str = Form("Live Recorded Meeting"), tar
 async def stop_web_recording(
     file: UploadFile = File(...),
     meeting_title: str = Form("Web Live Recorded Meeting"),
-    target_language: str = Form("English")
+    target_language: str = Form("English"),
+    live_transcript: str = Form("")
 ):
-    """Handles live audio recordings captured directly by client web browsers in cloud deployment mode."""
-    file_ext = os.path.splitext(file.filename)[1].lower()
-    if not file_ext:
-        file_ext = ".webm"
-
+    """
+    Accepts direct web browser PCM WAV audio blob recordings and processes in background.
+    """
+    file_ext = os.path.splitext(file.filename)[1] if file.filename else ".wav"
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     saved_filename = f"web_rec_{timestamp}{file_ext}"
     upload_filepath = os.path.join(RECORDINGS_DIR, saved_filename)
@@ -177,11 +177,20 @@ async def stop_web_recording(
 
     processed_wav = media_processor.process_media_file(upload_filepath)
 
+    live_trans_segments = []
+    if live_transcript.strip():
+        live_trans_segments = [{
+            "start": "00:00",
+            "end": "End",
+            "speaker": "Live Speaker",
+            "text": live_transcript.strip()
+        }]
+
     job = dispatch_background_meeting(
         filepath=processed_wav,
         meeting_title=meeting_title,
         target_language=target_language,
-        live_trans=[],
+        live_trans=live_trans_segments,
         speech_engine=speech_engine,
         get_analyzer_func=get_analyzer,
         load_json_func=load_json_file,
