@@ -253,6 +253,71 @@ async def android_upload_recording(
         "job": job
     }
 
+@app.post("/api/record/upload")
+@app.post("/api/recordings/upload")
+@app.post("/api/audio/upload")
+async def generic_upload_recording(
+    file: UploadFile = File(...),
+    meeting_title: str = Form("Recorded Meeting Session"),
+    target_language: str = Form("English"),
+    live_transcript: str = Form("")
+):
+    """Multiple API aliases for uploading audio recordings."""
+    return await android_upload_recording(file, meeting_title, target_language, live_transcript)
+
+@app.post("/api/transcribe/text")
+async def transcribe_text(
+    text: str = Form(""),
+    meeting_title: str = Form("Text Transcript Session"),
+    target_language: str = Form("English")
+):
+    """Directly transcribes and analyzes raw text transcript input."""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No transcript text provided.")
+
+    analyzer = get_analyzer()
+    analysis = analyzer.analyze_meeting(text, meeting_title, target_language)
+
+    meeting_id = uuid.uuid4().hex[:8]
+    created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    meeting_obj = {
+        "id": meeting_id,
+        "title": meeting_title,
+        "language": target_language,
+        "created_at": created_at,
+        "audio_url": "",
+        "audio_filename": "",
+        "transcript": text,
+        "segments": [{"start": "00:00", "end": "End", "speaker": "Speaker", "text": text}],
+        "summary": analysis.get("summary", ""),
+        "items_discussed": analysis.get("items_discussed", []),
+        "task_count": len(analysis.get("tasks", [])),
+        "prompt": analysis.get("prompt", ""),
+        "curl_command": analysis.get("curl_command", ""),
+        "response_raw": analysis.get("response_raw", "")
+    }
+
+    meetings = load_json_file(MEETINGS_FILE, [])
+    meetings.insert(0, meeting_obj)
+    save_json_file(MEETINGS_FILE, meetings)
+
+    existing_tasks = load_json_file(TASKS_FILE, [])
+    new_tasks = []
+    for t in analysis.get("tasks", []):
+        t_obj = dict(t)
+        t_obj["meeting_id"] = meeting_id
+        t_obj["language"] = target_language
+        new_tasks.append(t_obj)
+        existing_tasks.insert(0, t_obj)
+    save_json_file(TASKS_FILE, existing_tasks)
+
+    return {
+        "status": "success",
+        "meeting": meeting_obj,
+        "tasks": new_tasks
+    }
+
 @app.get("/api/record/status")
 async def recording_status():
     """Returns live volume decibel levels and recording status."""
