@@ -553,9 +553,15 @@ class MeetingAnalyzer:
                     clean_json_str = re.sub(r'^```(?:json)?\s*', '', clean_json_str, flags=re.MULTILINE)
                     clean_json_str = re.sub(r'\s*```$', '', clean_json_str, flags=re.MULTILINE)
                 
+                json_payload_str = json.dumps(payload, indent=2, ensure_ascii=False)
+                curl_cmd = f'curl -X POST "{url}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{json_payload_str}\''
+
                 try:
                     parsed = json.loads(clean_json_str.strip())
                     enriched = self._enrich_analysis_output(parsed, meeting_title, target_language)
+                    enriched["prompt"] = prompt
+                    enriched["curl_command"] = curl_cmd
+                    enriched["response_raw"] = reply_text
                     self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, enriched, duration_ms, "success", endpoint=url, http_method="POST", payload_dict=payload)
                     return enriched
                 except Exception as json_err:
@@ -573,7 +579,10 @@ class MeetingAnalyzer:
                             "due_date": "Tomorrow",
                             "status": "todo",
                             "subtasks": []
-                        }]
+                        }],
+                        "prompt": prompt,
+                        "curl_command": curl_cmd,
+                        "response_raw": reply_text
                     }
                     self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "partial_json_fallback", endpoint=url, http_method="POST", payload_dict=payload)
                     return fallback_res
