@@ -16,7 +16,7 @@ class MeetingAnalyzer:
         self.ollama_host = ollama_host or "http://localhost:11434"
         self.default_provider = default_provider
 
-    def _record_ai_log(self, provider, meeting_title, target_language, prompt, response_raw, parsed_output, duration_ms, status="success"):
+    def _record_ai_log(self, provider, meeting_title, target_language, prompt, response_raw, parsed_output, duration_ms, status="success", endpoint=None, http_method="POST", payload_dict=None):
         try:
             os.makedirs(os.path.dirname(AI_LOGS_FILE), exist_ok=True)
             logs = []
@@ -27,17 +27,30 @@ class MeetingAnalyzer:
                 except Exception:
                     logs = []
             
+            resolved_endpoint = endpoint or ("http://localhost:3005/api/v1/ai/chat" if "3005" in str(provider) else "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
+            
+            # Construct cURL command
+            if payload_dict:
+                json_payload_str = json.dumps(payload_dict, indent=2, ensure_ascii=False)
+            else:
+                json_payload_str = json.dumps({"prompt": prompt, "model": "Gemini 3.6 Flash (High)"}, indent=2, ensure_ascii=False)
+
+            curl_cmd = f'curl -X {http_method} "{resolved_endpoint}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{json_payload_str}\''
+
             entry = {
                 "id": "log_" + str(uuid.uuid4())[:8],
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "provider": provider,
+                "endpoint": resolved_endpoint,
+                "http_method": http_method,
                 "meeting_title": meeting_title,
                 "target_language": target_language,
                 "prompt": prompt,
                 "response_raw": response_raw,
                 "parsed_output": parsed_output,
                 "duration_ms": duration_ms,
-                "status": status
+                "status": status,
+                "curl_command": curl_cmd
             }
             logs.insert(0, entry)
             # Keep last 100 logs
@@ -543,7 +556,7 @@ class MeetingAnalyzer:
                 try:
                     parsed = json.loads(clean_json_str.strip())
                     enriched = self._enrich_analysis_output(parsed, meeting_title, target_language)
-                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, enriched, duration_ms, "success")
+                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, enriched, duration_ms, "success", endpoint=url, http_method="POST", payload_dict=payload)
                     return enriched
                 except Exception as json_err:
                     print(f"JSON Parse Error in Yogesh Chat response: {json_err}")
@@ -562,7 +575,7 @@ class MeetingAnalyzer:
                             "subtasks": []
                         }]
                     }
-                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "partial_json_fallback")
+                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "partial_json_fallback", endpoint=url, http_method="POST", payload_dict=payload)
                     return fallback_res
         except Exception as e:
             print(f"Yogesh Chat API (Port 3005) error: {e}")
