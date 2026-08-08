@@ -206,6 +206,53 @@ async def stop_web_recording(
         "job": job
     }
 
+@app.post("/api/android/upload")
+async def android_upload_recording(
+    file: UploadFile = File(...),
+    meeting_title: str = Form("Android Recorded Session"),
+    target_language: str = Form("English"),
+    live_transcript: str = Form("")
+):
+    """Accepts recording audio files uploaded from Android mobile app, transcribes audio, and extracts meeting summary + tasks."""
+    file_ext = os.path.splitext(file.filename)[1] if file.filename else ".wav"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    saved_filename = f"android_rec_{timestamp}{file_ext}"
+    upload_filepath = os.path.join(RECORDINGS_DIR, saved_filename)
+
+    with open(upload_filepath, "wb") as f:
+        content = await file.read()
+        f.write(content)
+
+    processed_wav = media_processor.process_media_file(upload_filepath)
+
+    live_trans_segments = []
+    if live_transcript.strip():
+        live_trans_segments = [{
+            "start": "00:00",
+            "end": "End",
+            "speaker": "Live Speaker",
+            "text": live_transcript.strip()
+        }]
+
+    job = dispatch_background_meeting(
+        filepath=processed_wav,
+        meeting_title=meeting_title,
+        target_language=target_language,
+        live_trans=live_trans_segments,
+        speech_engine=speech_engine,
+        get_analyzer_func=get_analyzer,
+        load_json_func=load_json_file,
+        save_json_func=save_json_file,
+        meetings_file=MEETINGS_FILE,
+        tasks_file=TASKS_FILE
+    )
+
+    return {
+        "status": "success",
+        "message": "Android audio uploaded! Processing session on server.",
+        "job": job
+    }
+
 @app.get("/api/record/status")
 async def recording_status():
     """Returns live volume decibel levels and recording status."""
