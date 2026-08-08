@@ -26,6 +26,10 @@ class MeetingAnalyzer:
         selected_provider = (provider or self.default_provider or "auto").lower()
 
         # Direct Provider Routing
+        if selected_provider in ["yogesh_chat", "yogesh", "chat3005"]:
+            res = self._analyze_yogesh_chat(transcript_text, meeting_title, target_language)
+            if res: return res
+
         if selected_provider == "groq" and self.groq_api_key:
             res = self._analyze_groq(transcript_text, meeting_title, target_language)
             if res: return res
@@ -45,7 +49,10 @@ class MeetingAnalyzer:
         if selected_provider == "local":
             return self._local_nlp_analysis(transcript_text, meeting_title, target_language=target_language)
 
-        # Auto Provider Resolution Strategy: Gemini -> Groq -> OpenAI -> Ollama -> Local NLP
+        # Auto Provider Resolution Strategy: Yogesh Chat API (Port 3005) -> Gemini -> Groq -> OpenAI -> Ollama -> Local NLP
+        res_yc = self._analyze_yogesh_chat(transcript_text, meeting_title, target_language)
+        if res_yc: return res_yc
+
         if self.api_key:
             res = self._analyze_gemini(transcript_text, meeting_title, target_language)
             if res: return res
@@ -471,6 +478,53 @@ class MeetingAnalyzer:
             "items_discussed": items_discussed,
             "tasks": tasks
         }
+
+    def _analyze_yogesh_chat(self, transcript_text, meeting_title, target_language):
+        """
+        Integrates Yogesh Chat REST API running on http://localhost:3005/api/v1/ai/chat
+        """
+        try:
+            url = "http://localhost:3005/api/v1/ai/chat"
+            prompt = self._get_analysis_prompt(transcript_text, target_language) + f"\n\nMeeting Title: {meeting_title}\n\nTranscript:\n{transcript_text}"
+            
+            payload = {
+                "prompt": prompt,
+                "model": "Gemini 3.6 Flash (High)"
+            }
+            
+            response = requests.post(url, json=payload, timeout=25)
+            if response.status_code == 200:
+                data = response.json()
+                reply_text = data.get("reply", "")
+                
+                clean_json_str = reply_text.strip()
+                if "```" in clean_json_str:
+                    clean_json_str = re.sub(r'^```(?:json)?\s*', '', clean_json_str, flags=re.MULTILINE)
+                    clean_json_str = re.sub(r'\s*```$', '', clean_json_str, flags=re.MULTILINE)
+                
+                try:
+                    parsed = json.loads(clean_json_str.strip())
+                    return self._enrich_analysis_output(parsed, meeting_title, target_language)
+                except Exception as json_err:
+                    print(f"JSON Parse Error in Yogesh Chat response: {json_err}")
+                    return {
+                        "summary": reply_text[:500],
+                        "items_discussed": [{"topic": "Meeting Notes", "details": reply_text, "category": "AI Output"}],
+                        "tasks": [{
+                            "id": str(uuid.uuid4())[:8],
+                            "title": f"Follow-up on {meeting_title}",
+                            "description": "Review generated meeting notes.",
+                            "assignee": "Team",
+                            "priority": "Medium",
+                            "category": "Follow-up",
+                            "due_date": "Tomorrow",
+                            "status": "todo",
+                            "subtasks": []
+                        }]
+                    }
+        except Exception as e:
+            print(f"Yogesh Chat API (Port 3005) error: {e}")
+        return None
 
     def _empty_analysis(self):
         return {
