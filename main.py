@@ -89,6 +89,11 @@ def get_analyzer():
 async def serve_index(request: Request):
     return FileResponse(os.path.join(TEMPLATES_DIR, "index.html"))
 
+@app.get("/api-docs", response_class=HTMLResponse)
+@app.get("/api/docs", response_class=HTMLResponse)
+async def serve_api_docs(request: Request):
+    return FileResponse(os.path.join(TEMPLATES_DIR, "api_docs.html"))
+
 @app.get("/api/devices")
 async def list_devices():
     """List microphone and system audio loopback devices."""
