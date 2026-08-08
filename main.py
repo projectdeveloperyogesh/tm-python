@@ -411,7 +411,18 @@ async def update_settings(payload: dict):
         if k in payload:
             settings[k] = payload[k]
     save_json_file(SETTINGS_FILE, settings)
-    return {"status": "saved"}
+    return {"status": "success", "settings": settings}
+
+AI_LOGS_FILE = os.path.join(DATA_DIR, "ai_logs.json")
+
+@app.get("/api/ai/logs")
+async def get_ai_logs():
+    return load_json_file(AI_LOGS_FILE, [])
+
+@app.delete("/api/ai/logs")
+async def clear_ai_logs():
+    save_json_file(AI_LOGS_FILE, [])
+    return {"status": "cleared"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,8 +1,7 @@
-import os
-import re
-import json
-import uuid
-import requests
+import datetime
+import time
+
+AI_LOGS_FILE = os.path.join(os.path.dirname(__file__), "data", "ai_logs.json")
 
 class MeetingAnalyzer:
     def __init__(self, api_key=None, groq_api_key=None, openai_api_key=None, ollama_host=None, default_provider="auto"):
@@ -11,6 +10,37 @@ class MeetingAnalyzer:
         self.openai_api_key = openai_api_key
         self.ollama_host = ollama_host or "http://localhost:11434"
         self.default_provider = default_provider
+
+    def _record_ai_log(self, provider, meeting_title, target_language, prompt, response_raw, parsed_output, duration_ms, status="success"):
+        try:
+            os.makedirs(os.path.dirname(AI_LOGS_FILE), exist_ok=True)
+            logs = []
+            if os.path.exists(AI_LOGS_FILE):
+                try:
+                    with open(AI_LOGS_FILE, "r", encoding="utf-8") as f:
+                        logs = json.load(f)
+                except Exception:
+                    logs = []
+            
+            entry = {
+                "id": "log_" + str(uuid.uuid4())[:8],
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "provider": provider,
+                "meeting_title": meeting_title,
+                "target_language": target_language,
+                "prompt": prompt,
+                "response_raw": response_raw,
+                "parsed_output": parsed_output,
+                "duration_ms": duration_ms,
+                "status": status
+            }
+            logs.insert(0, entry)
+            # Keep last 100 logs
+            logs = logs[:100]
+            with open(AI_LOGS_FILE, "w", encoding="utf-8") as f:
+                json.dump(logs, f, indent=2, ensure_ascii=False)
+        except Exception as err:
+            print(f"Error saving AI log: {err}")
 
     def analyze_meeting(self, transcript_text, meeting_title="Meeting Recording", target_language="English", provider=None):
         """
@@ -483,6 +513,7 @@ class MeetingAnalyzer:
         """
         Integrates Yogesh Chat REST API running on http://localhost:3005/api/v1/ai/chat
         """
+        t0 = time.time()
         try:
             url = "http://localhost:3005/api/v1/ai/chat"
             prompt = self._get_analysis_prompt(transcript_text, target_language) + f"\n\nMeeting Title: {meeting_title}\n\nTranscript:\n{transcript_text}"
@@ -493,6 +524,8 @@ class MeetingAnalyzer:
             }
             
             response = requests.post(url, json=payload, timeout=25)
+            duration_ms = int((time.time() - t0) * 1000)
+
             if response.status_code == 200:
                 data = response.json()
                 reply_text = data.get("reply", "")
@@ -504,10 +537,12 @@ class MeetingAnalyzer:
                 
                 try:
                     parsed = json.loads(clean_json_str.strip())
-                    return self._enrich_analysis_output(parsed, meeting_title, target_language)
+                    enriched = self._enrich_analysis_output(parsed, meeting_title, target_language)
+                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, enriched, duration_ms, "success")
+                    return enriched
                 except Exception as json_err:
                     print(f"JSON Parse Error in Yogesh Chat response: {json_err}")
-                    return {
+                    fallback_res = {
                         "summary": reply_text[:500],
                         "items_discussed": [{"topic": "Meeting Notes", "details": reply_text, "category": "AI Output"}],
                         "tasks": [{
@@ -522,6 +557,8 @@ class MeetingAnalyzer:
                             "subtasks": []
                         }]
                     }
+                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "partial_json_fallback")
+                    return fallback_res
         except Exception as e:
             print(f"Yogesh Chat API (Port 3005) error: {e}")
         return None
