@@ -1,30 +1,27 @@
-/* ==========================================================================
-   TaskPulse AI - Single Page Application JavaScript Controller
-   ========================================================================== */
+/* TaskPulse AI - Master Single-Page Application Controller */
+(function() {
+    'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-    // --- Application State ---
-    let state = {
+    // Application State
+    const state = {
         activeTab: 'recorderTab',
         isRecording: false,
         isPaused: false,
-        timerInterval: null,
+        isMicMuted: false,
+        isSpeakerMuted: false,
         statusPollInterval: null,
+        currentMeetingId: null,
         meetings: [],
         tasks: [],
-        currentMeetingId: null,
-        selectedFile: null
+        aiLogs: [],
+        jobsPollInterval: null,
+        isLocalAgentOnline: false
     };
 
-    // --- DOM Elements ---
+    // DOM Elements Cache
     const tabs = document.querySelectorAll('.nav-tab');
     const tabContents = document.querySelectorAll('.tab-content');
 
-    // Recorder Elements
-    const micSelect = document.getElementById('micSelect');
-    const speakerSelect = document.getElementById('speakerSelect');
-    const meetingTitleInput = document.getElementById('meetingTitleInput');
-    const recorderLanguageSelect = document.getElementById('recorderLanguageSelect');
     const startRecordBtn = document.getElementById('startRecordBtn');
     const pauseRecordBtn = document.getElementById('pauseRecordBtn');
     const stopRecordBtn = document.getElementById('stopRecordBtn');
@@ -32,62 +29,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const timerStatusLabel = document.getElementById('timerStatusLabel');
     const recordingStatusPill = document.getElementById('recordingStatusPill');
 
-    const micLevelBar = document.getElementById('micLevelBar');
-    const micLevelVal = document.getElementById('micLevelVal');
-    const speakerLevelBar = document.getElementById('speakerLevelBar');
-    const speakerLevelVal = document.getElementById('speakerLevelVal');
-    const waveformCanvas = document.getElementById('waveformCanvas');
+    const micSelect = document.getElementById('micSelect');
+    const speakerSelect = document.getElementById('speakerSelect');
+    const recorderLanguageSelect = document.getElementById('recorderLanguageSelect');
+    const meetingTitleInput = document.getElementById('meetingTitleInput');
 
-    // Uploader Elements
-    const dropzone = document.getElementById('dropzone');
-    const mediaFileInput = document.getElementById('mediaFileInput');
-    const selectedFileCard = document.getElementById('selectedFileCard');
-    const fileName = document.getElementById('fileName');
-    const fileSize = document.getElementById('fileSize');
-    const clearFileBtn = document.getElementById('clearFileBtn');
+    const micLevelBar = document.getElementById('micLevelBar');
+    const speakerLevelBar = document.getElementById('speakerLevelBar');
+    const micLevelVal = document.getElementById('micLevelVal');
+    const speakerLevelVal = document.getElementById('speakerLevelVal');
+    const liveTranscriptContainer = document.getElementById('liveTranscriptContainer');
+
+    const uploadDropzone = document.getElementById('uploadDropzone');
+    const fileInput = document.getElementById('fileInput');
     const uploadTitleInput = document.getElementById('uploadTitleInput');
     const uploadLanguageSelect = document.getElementById('uploadLanguageSelect');
     const processUploadBtn = document.getElementById('processUploadBtn');
-    const uploadProgress = document.getElementById('uploadProgress');
+    const uploadProgressContainer = document.getElementById('uploadProgressContainer');
+    const uploadProgressBar = document.getElementById('uploadProgressBar');
+    const uploadStatusText = document.getElementById('uploadStatusText');
 
-    // Insights Elements
-    const meetingSessionSelect = document.getElementById('meetingSessionSelect');
-    const insightsLanguageSelect = document.getElementById('insightsLanguageSelect');
-    const reanalyzeBtn = document.getElementById('reanalyzeBtn');
-    const summaryLangBadge = document.getElementById('summaryLangBadge');
-    const summaryContent = document.getElementById('summaryContent');
-    const itemsDiscussedContainer = document.getElementById('itemsDiscussedContainer');
-    const meetingAudioPlayer = document.getElementById('meetingAudioPlayer');
-    const transcriptContainer = document.getElementById('transcriptContainer');
-    const transcriptSearchInput = document.getElementById('transcriptSearchInput');
+    const meetingHistoryList = document.getElementById('meetingHistoryList');
+    const meetingDetailsContainer = document.getElementById('meetingDetailsContainer');
 
-    // Task Board Elements
-    const totalTasksCount = document.getElementById('totalTasksCount');
-    const todoTaskList = document.getElementById('todoTaskList');
-    const progressTaskList = document.getElementById('progressTaskList');
-    const completedTaskList = document.getElementById('completedTaskList');
-    const todoCount = document.getElementById('todoCount');
-    const progressCount = document.getElementById('progressCount');
-    const completedCount = document.getElementById('completedCount');
-    const taskSearchInput = document.getElementById('taskSearchInput');
-    const priorityFilter = document.getElementById('priorityFilter');
-    const statusFilter = document.getElementById('statusFilter');
-    const openNewTaskBtn = document.getElementById('openNewTaskBtn');
-    const exportBtn = document.getElementById('exportBtn');
-    const exportMenu = document.getElementById('exportMenu');
+    const taskKanbanBoard = document.getElementById('taskKanbanBoard');
+    const addTaskBtn = document.getElementById('addTaskBtn');
 
-    // History Elements
-    const historyListContainer = document.getElementById('historyListContainer');
+    const aiLogsTableBody = document.getElementById('aiLogsTableBody');
+    const refreshLogsBtn = document.getElementById('refreshLogsBtn');
+    const clearLogsBtn = document.getElementById('clearLogsBtn');
+    const viewLogModal = document.getElementById('viewLogModal');
+    const logModalContent = document.getElementById('logModalContent');
+    const closeLogModalBtn = document.getElementById('closeLogModalBtn');
 
-    // Modals
-    const taskModal = document.getElementById('taskModal');
-    const taskForm = document.getElementById('taskForm');
-    const closeTaskModalBtn = document.getElementById('closeTaskModalBtn');
-    const cancelTaskModalBtn = document.getElementById('cancelTaskModalBtn');
-    const settingsModal = document.getElementById('settingsModal');
     const openSettingsBtn = document.getElementById('openSettingsBtn');
+    const settingsModal = document.getElementById('settingsModal');
     const closeSettingsModalBtn = document.getElementById('closeSettingsModalBtn');
     const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+
+    const LOCAL_AGENT_URL = "http://127.0.0.1:18514";
 
     // --- Initialization ---
     init();
@@ -107,6 +87,43 @@ document.addEventListener('DOMContentLoaded', () => {
         setupAiLogsEvents();
         initCanvasWaveform();
         loadAiLogs();
+
+        checkLocalAgentHealth();
+        setInterval(checkLocalAgentHealth, 4000);
+    }
+
+    async function checkLocalAgentHealth() {
+        const badge = document.getElementById('localAgentBadge');
+        const icon = document.getElementById('localAgentIcon');
+        const text = document.getElementById('localAgentText');
+        const helpBtn = document.getElementById('localAgentHelpBtn');
+        if (!badge || !text) return;
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const res = await fetch(`${LOCAL_AGENT_URL}/health`, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            const data = await res.json();
+
+            if (data.status === 'running') {
+                state.isLocalAgentOnline = true;
+                badge.style.background = 'rgba(52, 211, 153, 0.12)';
+                badge.style.borderColor = 'rgba(52, 211, 153, 0.3)';
+                if (icon) icon.style.color = '#34d399';
+                text.innerHTML = '🟢 Local Soundcard Agent Connected (<span style="font-family: monospace;">127.0.0.1:18514</span>)';
+                if (helpBtn) helpBtn.style.display = 'none';
+            } else {
+                throw new Error('Agent offline');
+            }
+        } catch (e) {
+            state.isLocalAgentOnline = false;
+            badge.style.background = 'rgba(248, 113, 113, 0.12)';
+            badge.style.borderColor = 'rgba(248, 113, 113, 0.3)';
+            if (icon) icon.style.color = '#f87171';
+            text.innerHTML = '🔴 Local Soundcard Agent Offline (<span style="font-family: monospace;">127.0.0.1:18514</span>)';
+            if (helpBtn) helpBtn.style.display = 'inline-block';
+        }
     }
 
     // --- Navigation Tabs ---
@@ -172,254 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Pure JavaScript 16kHz PCM WAV Audio Encoder (Hardware Adaptive & Zero Dependencies) ---
-    class WebWavEncoder {
-        constructor() {
-            this.audioCtx = null;
-            this.stream = null;
-            this.processor = null;
-            this.pcmSamples = [];
-            this.inputSampleRate = 44100;
-            this.targetSampleRate = 16000;
-            this.isRecording = false;
-        }
-
-        async start(onVolumeUpdate) {
-            this.pcmSamples = [];
-            this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
-            // Default to native hardware sample rate to prevent NotSupportedError on soundcards
-            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            this.inputSampleRate = this.audioCtx.sampleRate || 44100;
-
-            const source = this.audioCtx.createMediaStreamSource(this.stream);
-            
-            this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
-            const analyser = this.audioCtx.createAnalyser();
-            analyser.fftSize = 256;
-
-            source.connect(analyser);
-            source.connect(this.processor);
-            this.processor.connect(this.audioCtx.destination);
-
-            this.processor.onaudioprocess = (e) => {
-                if (!this.isRecording) return;
-                const inputData = e.inputBuffer.getChannelData(0);
-                this.pcmSamples.push(new Float32Array(inputData));
-
-                if (onVolumeUpdate) {
-                    let sum = 0;
-                    for (let i = 0; i < inputData.length; i++) {
-                        sum += inputData[i] * inputData[i];
-                    }
-                    const rms = Math.sqrt(sum / inputData.length);
-                    const level = Math.min(100, Math.round(rms * 250));
-                    onVolumeUpdate(level);
-                }
-            };
-
-            this.isRecording = true;
-        }
-
-        stop() {
-            this.isRecording = false;
-            if (this.processor) {
-                try { this.processor.disconnect(); } catch(e){}
-                this.processor = null;
-            }
-            if (this.stream) {
-                this.stream.getTracks().forEach(track => track.stop());
-                this.stream = null;
-            }
-            if (this.audioCtx) {
-                try { this.audioCtx.close(); } catch(e){}
-                this.audioCtx = null;
-            }
-
-            let totalSamples = 0;
-            for (let chunk of this.pcmSamples) totalSamples += chunk.length;
-            const merged = new Float32Array(totalSamples);
-            let offset = 0;
-            for (let chunk of this.pcmSamples) {
-                merged.set(chunk, offset);
-                offset += chunk.length;
-            }
-
-            const resampled = this.resampleBuffer(merged, this.inputSampleRate, this.targetSampleRate);
-            return this.encodeWAV(resampled, this.targetSampleRate);
-        }
-
-        resampleBuffer(buffer, inRate, outRate) {
-            if (inRate === outRate || !buffer || buffer.length === 0) return buffer;
-            const ratio = inRate / outRate;
-            const newLength = Math.round(buffer.length / ratio);
-            const result = new Float32Array(newLength);
-            for (let i = 0; i < newLength; i++) {
-                const originIndex = i * ratio;
-                const indexFloor = Math.floor(originIndex);
-                const indexCeil = Math.min(buffer.length - 1, Math.ceil(originIndex));
-                const factor = originIndex - indexFloor;
-                result[i] = buffer[indexFloor] * (1 - factor) + buffer[indexCeil] * factor;
-            }
-            return result;
-        }
-
-        encodeWAV(samples, sampleRate) {
-            const buffer = new ArrayBuffer(44 + samples.length * 2);
-            const view = new DataView(buffer);
-
-            this.writeString(view, 0, 'RIFF');
-            view.setUint32(4, 36 + samples.length * 2, true);
-            this.writeString(view, 8, 'WAVE');
-            this.writeString(view, 12, 'fmt ');
-            view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true);
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true);
-            view.setUint16(32, 2, true);
-            view.setUint16(34, 16, true);
-            this.writeString(view, 36, 'data');
-            view.setUint32(40, samples.length * 2, true);
-
-            let index = 44;
-            for (let i = 0; i < samples.length; i++) {
-                const s = Math.max(-1, Math.min(1, samples[i]));
-                view.setInt16(index, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-                index += 2;
-            }
-
-            return new Blob([view], { type: 'audio/wav' });
-        }
-
-        writeString(view, offset, string) {
-            for (let i = 0; i < string.length; i++) {
-                view.setUint8(offset + i, string.charCodeAt(i));
-            }
-        }
-    }
-
-    let webWavEncoder = null;
-    let webTimerInterval = null;
-    let webSecondsElapsed = 0;
-    let webSpeechRecognizer = null;
-    let webLiveTranscriptText = "";
-
-    async function startWebBrowserRecording() {
-        webSecondsElapsed = 0;
-        webLiveTranscriptText = "";
-        webWavEncoder = new WebWavEncoder();
-        
-        await webWavEncoder.start((level) => {
-            micLevelBar.style.width = `${level}%`;
-            micLevelVal.textContent = `${level}%`;
-            speakerLevelBar.style.width = `${Math.round(level * 0.7)}%`;
-            speakerLevelVal.textContent = `${Math.round(level * 0.7)}%`;
-            updateWaveform(level, level * 0.7);
-        });
-
-        state.isRecording = true;
-        state.isPaused = false;
-
-        // Initialize Web Speech Recognition API if available in browser
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRec) {
-            try {
-                webSpeechRecognizer = new SpeechRec();
-                webSpeechRecognizer.continuous = true;
-                webSpeechRecognizer.interimResults = true;
-                webSpeechRecognizer.lang = 'en-US';
-
-                webSpeechRecognizer.onresult = (event) => {
-                    let interim = '';
-                    let final = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            final += event.results[i][0].transcript + ' ';
-                        } else {
-                            interim += event.results[i][0].transcript;
-                        }
-                    }
-
-                    if (final.trim()) {
-                        webLiveTranscriptText += final + ' ';
-                        if (liveTranscriptContainer) {
-                            const timeStr = String(Math.floor(webSecondsElapsed / 60)).padStart(2, '0') + ':' + String(webSecondsElapsed % 60).padStart(2, '0');
-                            const div = document.createElement('div');
-                            div.className = 'transcript-line';
-                            div.innerHTML = `<span class="speaker" style="color: var(--accent-cyan);">[${timeStr}] Live Speaker:</span> ${escapeHtml(final.trim())}`;
-                            liveTranscriptContainer.appendChild(div);
-                            liveTranscriptContainer.scrollTop = liveTranscriptContainer.scrollHeight;
-                        }
-                    }
-                };
-
-                webSpeechRecognizer.onerror = (e) => {
-                    console.warn('Web Speech Recognition notice:', e.error);
-                };
-
-                webSpeechRecognizer.onend = () => {
-                    if (state.isRecording && webSpeechRecognizer) {
-                        try { webSpeechRecognizer.start(); } catch (err) {}
-                    }
-                };
-
-                webSpeechRecognizer.start();
-            } catch (recErr) {
-                console.warn('Could not start web speech recognizer:', recErr);
-            }
-        }
-
-        webTimerInterval = setInterval(() => {
-            if (state.isRecording && !state.isPaused) {
-                webSecondsElapsed++;
-                const hrs = String(Math.floor(webSecondsElapsed / 3600)).padStart(2, '0');
-                const mins = String(Math.floor((webSecondsElapsed % 3600) / 60)).padStart(2, '0');
-                const scs = String(webSecondsElapsed % 60).padStart(2, '0');
-                recordingTimer.textContent = `${hrs}:${mins}:${scs}`;
-            }
-        }, 1000);
-
-        return { status: "web_recording_started" };
-    }
-
-    async function stopWebBrowserRecording(title, targetLanguage) {
-        if (webTimerInterval) {
-            clearInterval(webTimerInterval);
-            webTimerInterval = null;
-        }
-
-        if (webSpeechRecognizer) {
-            try { webSpeechRecognizer.stop(); } catch (e) {}
-            webSpeechRecognizer = null;
-        }
-
-        if (!webWavEncoder) {
-            throw new Error("Web recording session was not active.");
-        }
-
-        const audioBlob = webWavEncoder.stop();
-        webWavEncoder = null;
-
-        if (audioBlob.size < 100) {
-            throw new Error("No clear audio was recorded in browser. Please check microphone permission.");
-        }
-
-        const formData = new FormData();
-        formData.append('file', audioBlob, 'live_web_recording.wav');
-        formData.append('meeting_title', title);
-        formData.append('target_language', targetLanguage);
-        if (webLiveTranscriptText.trim()) {
-            formData.append('live_transcript', webLiveTranscriptText.trim());
-        }
-
-        const res = await fetch('/api/record/stop_web', {
-            method: 'POST',
-            body: formData
-        });
-        return await res.json();
-    }
-
     // --- Live Recording ---
     function setupRecorderEvents() {
         const engineSelect = document.getElementById('recordingEngineSelect');
@@ -427,67 +196,77 @@ document.addEventListener('DOMContentLoaded', () => {
         const muteMicBtn = document.getElementById('muteMicBtn');
         const muteSpeakerBtn = document.getElementById('muteSpeakerBtn');
 
-        if (engineSelect && deviceSelectorsContainer) {
-            const toggleDeviceSelectors = () => {
-                if (engineSelect.value === 'desktop') {
-                    deviceSelectorsContainer.style.display = 'grid';
-                } else {
-                    deviceSelectorsContainer.style.display = 'none';
-                }
-            };
-            engineSelect.addEventListener('change', toggleDeviceSelectors);
-            toggleDeviceSelectors();
-        }
-
         startRecordBtn.addEventListener('click', async () => {
+            const title = meetingTitleInput.value.trim() || 'Live Recorded Meeting';
+            const lang = recorderLanguageSelect ? recorderLanguageSelect.value : 'English';
+            const serverUrl = window.location.origin;
+
+            if (state.isLocalAgentOnline) {
+                try {
+                    const res = await fetch(`${LOCAL_AGENT_URL}/start`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            server_url: serverUrl,
+                            meeting_title: title,
+                            target_language: lang
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'recording_started' || data.status === 'already_recording') {
+                        state.isRecording = true;
+                        state.isPaused = false;
+                        startRecordBtn.disabled = true;
+                        pauseRecordBtn.disabled = false;
+                        stopRecordBtn.disabled = false;
+                        timerStatusLabel.textContent = 'Recording Live (Local Soundcard Agent)';
+                        recordingStatusPill.textContent = 'Recording';
+                        startStatusPolling();
+                        lucide.createIcons();
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('Local agent start notice:', err);
+                }
+            }
+
             const formData = new FormData();
             formData.append('mic_id', micSelect.value || '');
             formData.append('speaker_id', speakerSelect.value || '');
+            formData.append('meeting_title', title);
+            formData.append('target_language', lang);
 
             try {
-                const res = await fetch('/api/record/start', {
-                    method: 'POST',
-                    body: formData
-                });
+                const res = await fetch('/api/record/start', { method: 'POST', body: formData });
                 const data = await res.json();
-
                 if (data.status === 'recording_started' || data.status === 'already_recording') {
                     state.isRecording = true;
                     state.isPaused = false;
-                    state.isMicMuted = false;
-                    state.isSpeakerMuted = false;
-
-                    if (muteMicBtn) {
-                        muteMicBtn.innerHTML = '<i data-lucide="mic"></i> Mic On';
-                        muteMicBtn.classList.remove('btn-danger');
-                        muteMicBtn.classList.add('btn-secondary');
-                    }
-                    if (muteSpeakerBtn) {
-                        muteSpeakerBtn.innerHTML = '<i data-lucide="volume-2"></i> Speaker On';
-                        muteSpeakerBtn.classList.remove('btn-danger');
-                        muteSpeakerBtn.classList.add('btn-secondary');
-                    }
-
                     startRecordBtn.disabled = true;
                     pauseRecordBtn.disabled = false;
                     stopRecordBtn.disabled = false;
-                    timerStatusLabel.textContent = 'Recording Live (Desktop Soundcard)';
+                    timerStatusLabel.textContent = 'Recording Live (Server Soundcard)';
                     recordingStatusPill.textContent = 'Recording';
-
                     startStatusPolling();
                     lucide.createIcons();
                 } else {
-                    alert('🎙️ Desktop Dual Soundcard Recorder Notice: ' + (data.message || 'Please check microphone & speaker permissions.'));
+                    alert('🎙️ Soundcard Recording Notice: ' + (data.message || 'Please launch start_local_agent.bat on your PC.'));
                 }
             } catch (e) {
-                alert('Failed to start desktop recording: ' + (e.message || e));
+                alert('Failed to start recording: ' + (e.message || e));
             }
         });
 
         pauseRecordBtn.addEventListener('click', async () => {
             try {
-                const res = await fetch('/api/record/pause', { method: 'POST' });
-                const data = await res.json();
+                let data = null;
+                if (state.isLocalAgentOnline) {
+                    const res = await fetch(`${LOCAL_AGENT_URL}/pause`, { method: 'POST' });
+                    data = await res.json();
+                } else {
+                    const res = await fetch('/api/record/pause', { method: 'POST' });
+                    data = await res.json();
+                }
 
                 if (data.status === 'paused') {
                     state.isPaused = true;
@@ -564,18 +343,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const lang = recorderLanguageSelect ? recorderLanguageSelect.value : 'English';
 
             stopRecordBtn.disabled = true;
-            timerStatusLabel.textContent = 'Transcribing & Processing...';
+            timerStatusLabel.textContent = 'Transcribing & Processing by Cloud AI...';
 
             try {
-                const formData = new FormData();
-                formData.append('meeting_title', title);
-                formData.append('target_language', lang);
+                let data = null;
+                if (state.isLocalAgentOnline) {
+                    const res = await fetch(`${LOCAL_AGENT_URL}/stop`, { method: 'POST' });
+                    data = await res.json();
+                } else {
+                    const formData = new FormData();
+                    formData.append('meeting_title', title);
+                    formData.append('target_language', lang);
 
-                const res = await fetch('/api/record/stop', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await res.json();
+                    const res = await fetch('/api/record/stop', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    data = await res.json();
+                }
 
                 state.isRecording = false;
                 state.isPaused = false;
@@ -592,40 +377,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 micLevelVal.textContent = '0%';
                 speakerLevelVal.textContent = '0%';
 
-                if (data && (data.status === 'success' || data.status === 'background_processing')) {
-                    if (data.status === 'background_processing') {
-                        const bgJobsModal = document.getElementById('bgJobsModal');
-                        if (bgJobsModal) bgJobsModal.classList.remove('hidden');
-                        startJobsPolling();
-                    } else if (data.meeting) {
-                        state.currentMeetingId = data.meeting.id;
+                if (data && (data.status === 'success' || data.meeting)) {
+                    const meeting = data.meeting || data;
+                    if (meeting.id) {
+                        state.currentMeetingId = meeting.id;
                         await loadMeetings();
                         await loadTasks();
-                        switchMeetingSession(data.meeting.id);
+                        switchMeetingSession(meeting.id);
                         activateTab('insightsTab');
                     }
-                } else if (data && data.detail) {
-                    if (data.detail.includes('ECONNRESET') || data.detail.includes('reset') || data.detail.includes('timed out')) {
-                        const bgJobsModal = document.getElementById('bgJobsModal');
-                        if (bgJobsModal) bgJobsModal.classList.remove('hidden');
-                        startJobsPolling();
-                    } else {
-                        alert('Error processing recording: ' + data.detail);
-                        startRecordBtn.disabled = false;
-                    }
+                } else if (data && data.error) {
+                    alert('Error processing recording: ' + data.error);
+                    startRecordBtn.disabled = false;
                 }
             } catch (e) {
-                const errStr = (e.message || String(e)).toLowerCase();
-                if (errStr.includes('econnreset') || errStr.includes('reset') || errStr.includes('failed to fetch') || errStr.includes('networkerror')) {
-                    const bgJobsModal = document.getElementById('bgJobsModal');
-                    if (bgJobsModal) bgJobsModal.classList.remove('hidden');
-                    startJobsPolling();
-                } else {
-                    alert('Error processing recording: ' + (e.message || e));
-                    startRecordBtn.disabled = false;
-                    stopRecordBtn.disabled = false;
-                    timerStatusLabel.textContent = 'Standby';
-                }
+                alert('Error processing recording: ' + (e.message || e));
+                startRecordBtn.disabled = false;
+                stopRecordBtn.disabled = false;
+                timerStatusLabel.textContent = 'Standby';
             }
             lucide.createIcons();
         });
@@ -638,50 +407,39 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state.isRecording) return;
 
             try {
-                const res = await fetch('/api/record/status');
-                const data = await res.json();
+                let data = null;
+                if (state.isLocalAgentOnline) {
+                    const res = await fetch(`${LOCAL_AGENT_URL}/status`);
+                    data = await res.json();
+                } else {
+                    const res = await fetch('/api/record/status');
+                    data = await res.json();
+                }
 
-                // Format time
-                const secs = data.elapsed_seconds || 0;
-                const hrs = String(Math.floor(secs / 3600)).padStart(2, '0');
-                const mins = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
-                const scs = String(secs % 60).padStart(2, '0');
-                recordingTimer.textContent = `${hrs}:${mins}:${scs}`;
+                if (data) {
+                    const secs = data.elapsed_seconds || 0;
+                    const hrs = String(Math.floor(secs / 3600)).padStart(2, '0');
+                    const mins = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+                    const scs = String(secs % 60).padStart(2, '0');
+                    recordingTimer.textContent = `${hrs}:${mins}:${scs}`;
 
-                // Update sound meters (0% - 100% percentage scaling)
-                const rawMic = data.mic_level || 0;
-                const rawSpk = data.speaker_level || 0;
+                    const rawMic = data.mic_level || 0;
+                    const rawSpk = data.speaker_level || 0;
 
-                const micLvl = Math.min(100, Math.max(0, Math.round(rawMic)));
-                const spkLvl = Math.min(100, Math.max(0, Math.round(rawSpk)));
+                    const micLvl = Math.min(100, Math.max(0, Math.round(rawMic)));
+                    const spkLvl = Math.min(100, Math.max(0, Math.round(rawSpk)));
 
-                micLevelBar.style.width = `${micLvl}%`;
-                micLevelVal.textContent = `${micLvl}%`;
+                    micLevelBar.style.width = `${micLvl}%`;
+                    speakerLevelBar.style.width = `${spkLvl}%`;
+                    micLevelVal.textContent = `${micLvl}%`;
+                    speakerLevelVal.textContent = `${spkLvl}%`;
 
-                speakerLevelBar.style.width = `${spkLvl}%`;
-                speakerLevelVal.textContent = `${spkLvl}%`;
-
-                updateWaveform(micLvl, spkLvl);
-
-                // Update Live Transcript Stream
-                if (data.live_transcript && data.live_transcript.length > 0) {
-                    const feed = document.getElementById('liveTranscriptFeed');
-                    if (feed) {
-                        feed.innerHTML = '';
-                        data.live_transcript.forEach(item => {
-                            const line = document.createElement('div');
-                            const isYou = item.speaker.includes('You') || item.speaker.includes('Microphone');
-                            line.className = `live-transcript-line ${isYou ? 'speaker-you' : 'speaker-participant'}`;
-                            line.innerHTML = `<span class="live-time-stamp">[${item.time}]</span> <span class="live-speaker-name">${escapeHtml(item.speaker)}:</span> ${escapeHtml(item.text)}`;
-                            feed.appendChild(line);
-                        });
-                        feed.scrollTop = feed.scrollHeight;
-                    }
+                    updateWaveform(micLvl, spkLvl);
                 }
             } catch (e) {
-                console.error(e);
+                console.warn('Status poll notice:', e);
             }
-        }, 200);
+        }, 1000);
     }
 
     function stopStatusPolling() {
@@ -691,1026 +449,462 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Waveform Canvas ---
+    // --- Canvas Waveform Animation ---
+    let canvasCtx = null;
+    let canvasWidth = 0;
+    let canvasHeight = 0;
     let waveformPoints = [];
-    function initCanvasWaveform() {
-        if (!waveformCanvas) return;
-        const ctx = waveformCanvas.getContext('2d');
-        waveformCanvas.width = waveformCanvas.parentElement.clientWidth;
-        waveformCanvas.height = waveformCanvas.parentElement.clientHeight;
 
-        for (let i = 0; i < 50; i++) {
+    function initCanvasWaveform() {
+        const canvas = document.getElementById('waveformCanvas');
+        if (!canvas) return;
+        canvasCtx = canvas.getContext('2d');
+        canvasWidth = canvas.width = canvas.parentElement.clientWidth || 400;
+        canvasHeight = canvas.height = canvas.parentElement.clientHeight || 120;
+
+        for (let i = 0; i < 40; i++) {
             waveformPoints.push(5);
         }
         drawWaveform();
     }
 
-    function updateWaveform(micVal, speakerVal) {
-        const val = Math.max(10, Math.max(micVal, speakerVal) * 0.9);
+    function updateWaveform(micLvl, spkLvl) {
+        const val = Math.max(5, (micLvl + spkLvl) / 2);
         waveformPoints.push(val);
-        if (waveformPoints.length > 60) waveformPoints.shift();
+        if (waveformPoints.length > 50) waveformPoints.shift();
         drawWaveform();
     }
 
     function drawWaveform() {
-        if (!waveformCanvas) return;
-        const ctx = waveformCanvas.getContext('2d');
-        const w = waveformCanvas.width;
-        const h = waveformCanvas.height;
+        if (!canvasCtx) return;
+        canvasCtx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-        ctx.clearRect(0, 0, w, h);
-
-        const barWidth = w / waveformPoints.length;
+        const step = canvasWidth / (waveformPoints.length - 1);
+        canvasCtx.beginPath();
+        canvasCtx.strokeStyle = '#38bdf8';
+        canvasCtx.lineWidth = 2;
 
         for (let i = 0; i < waveformPoints.length; i++) {
-            const val = waveformPoints[i];
-            const barHeight = (val / 100) * (h * 0.8);
-            const x = i * barWidth;
-            const y = (h - barHeight) / 2;
+            const x = i * step;
+            const h = (waveformPoints[i] / 100) * (canvasHeight / 2);
+            const y = (canvasHeight / 2) - h;
 
-            const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-            gradient.addColorStop(0, '#38bdf8');
-            gradient.addColorStop(1, '#c084fc');
-
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x, y, barWidth - 2, barHeight);
+            if (i === 0) canvasCtx.moveTo(x, y);
+            else canvasCtx.lineTo(x, y);
         }
+        canvasCtx.stroke();
     }
 
-    // --- Media Uploader ---
+    // --- Media Upload ---
     function setupUploaderEvents() {
-        dropzone.addEventListener('click', () => mediaFileInput.click());
+        if (!uploadDropzone || !fileInput) return;
 
-        dropzone.addEventListener('dragover', (e) => {
+        uploadDropzone.addEventListener('click', () => fileInput.click());
+        uploadDropzone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropzone.style.borderColor = '#38bdf8';
+            uploadDropzone.classList.add('dragover');
         });
-
-        dropzone.addEventListener('dragleave', () => {
-            dropzone.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-        });
-
-        dropzone.addEventListener('drop', (e) => {
+        uploadDropzone.addEventListener('dragleave', () => uploadDropzone.classList.remove('dragover'));
+        uploadDropzone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropzone.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+            uploadDropzone.classList.remove('dragover');
             if (e.dataTransfer.files.length > 0) {
-                handleFileSelect(e.dataTransfer.files[0]);
+                fileInput.files = e.dataTransfer.files;
+                updateSelectedFileName();
             }
         });
 
-        mediaFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
-            }
-        });
-
-        clearFileBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            state.selectedFile = null;
-            selectedFileCard.classList.add('hidden');
-            dropzone.classList.remove('hidden');
-            processUploadBtn.disabled = true;
-        });
+        fileInput.addEventListener('change', updateSelectedFileName);
 
         processUploadBtn.addEventListener('click', async () => {
-            if (!state.selectedFile) return;
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('Please select an audio or video file first.');
+                return;
+            }
 
-            const title = uploadTitleInput.value.trim() || state.selectedFile.name;
-            const lang = uploadLanguageSelect ? uploadLanguageSelect.value : 'English';
+            const file = fileInput.files[0];
+            const title = uploadTitleInput.value.trim() || file.name.replace(/\.[^/.]+$/, "");
+            const lang = uploadLanguageSelect.value;
+
+            processUploadBtn.disabled = true;
+            uploadProgressContainer.style.display = 'block';
+            uploadProgressBar.style.width = '20%';
+            uploadStatusText.textContent = 'Uploading media file to server...';
+
             const formData = new FormData();
-            formData.append('file', state.selectedFile);
+            formData.append('file', file);
             formData.append('meeting_title', title);
             formData.append('target_language', lang);
 
-            processUploadBtn.disabled = true;
-            uploadProgress.classList.remove('hidden');
-
             try {
+                uploadProgressBar.style.width = '50%';
+                uploadStatusText.textContent = 'Transcribing speech & analyzing with AI...';
+
                 const res = await fetch('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
                 const data = await res.json();
 
-                uploadProgress.classList.add('hidden');
-                processUploadBtn.disabled = false;
+                uploadProgressBar.style.width = '100%';
+                uploadStatusText.textContent = 'Complete!';
 
-                if (data && (data.status === 'success' || data.status === 'background_processing')) {
-                    state.selectedFile = null;
-                    selectedFileCard.classList.add('hidden');
-                    dropzone.classList.remove('hidden');
-                    uploadTitleInput.value = '';
-
-                    const bgJobsModal = document.getElementById('bgJobsModal');
-                    if (bgJobsModal) bgJobsModal.classList.remove('hidden');
-                    startJobsPolling();
-
-                    if (data.meeting) {
-                        state.currentMeetingId = data.meeting.id;
-                        await loadMeetings();
-                        await loadTasks();
-                        switchMeetingSession(data.meeting.id);
-                        activateTab('insightsTab');
-                    }
+                if (data.status === 'success' && data.meeting) {
+                    state.currentMeetingId = data.meeting.id;
+                    await loadMeetings();
+                    await loadTasks();
+                    switchMeetingSession(data.meeting.id);
+                    activateTab('insightsTab');
                 } else {
-                    alert('Upload error: ' + (data.detail || 'Failed to process file'));
+                    alert('Error: ' + (data.detail || 'Upload failed.'));
                 }
             } catch (e) {
-                alert('File processing error: ' + e);
-                uploadProgress.classList.add('hidden');
+                alert('Error uploading file: ' + (e.message || e));
+            } finally {
                 processUploadBtn.disabled = false;
+                setTimeout(() => {
+                    uploadProgressContainer.style.display = 'none';
+                    uploadProgressBar.style.width = '0%';
+                }, 2000);
             }
         });
     }
 
-    function handleFileSelect(file) {
-        state.selectedFile = file;
-        fileName.textContent = file.name;
-        fileSize.textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-
-        dropzone.classList.add('hidden');
-        selectedFileCard.classList.remove('hidden');
-        processUploadBtn.disabled = false;
+    function updateSelectedFileName() {
+        if (fileInput.files.length > 0) {
+            const f = fileInput.files[0];
+            uploadDropzone.querySelector('.dropzone-text').textContent = `Selected: ${f.name} (${(f.size / (1024*1024)).toFixed(2)} MB)`;
+        }
     }
 
-    // --- Meetings & Insights ---
-    async function loadMeetings(selectLatest = false) {
+    // --- Meetings Data Loading ---
+    async function loadMeetings() {
         try {
             const res = await fetch('/api/meetings');
             state.meetings = await res.json();
-
-            meetingSessionSelect.innerHTML = '';
-            historyListContainer.innerHTML = '';
-
-            if (state.meetings.length === 0) {
-                meetingSessionSelect.innerHTML = '<option value="">No meetings recorded yet</option>';
-                summaryContent.textContent = 'Record a live meeting or upload a media file to view insights.';
-                itemsDiscussedContainer.innerHTML = '<p class="empty-state">No items discussed extracted yet.</p>';
-                transcriptContainer.innerHTML = '<p class="empty-state">Transcript will appear here.</p>';
-                historyListContainer.innerHTML = '<p class="empty-state">No saved meetings found.</p>';
-                return;
+            renderMeetingHistory();
+            if (state.meetings.length > 0 && !state.currentMeetingId) {
+                switchMeetingSession(state.meetings[0].id);
             }
-
-            state.meetings.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = `${m.title} (${m.created_at})`;
-                meetingSessionSelect.appendChild(opt);
-            });
-
-            if (selectLatest || !state.currentMeetingId || !state.meetings.some(m => m.id === state.currentMeetingId)) {
-                state.currentMeetingId = state.meetings[0].id;
-            }
-            switchMeetingSession(state.currentMeetingId);
-            renderHistoryList();
         } catch (e) {
             console.error('Error loading meetings:', e);
         }
     }
 
-    function setupInsightsEvents() {
-        meetingSessionSelect.addEventListener('change', (e) => {
-            switchMeetingSession(e.target.value);
-        });
+    function renderMeetingHistory() {
+        if (!meetingHistoryList) return;
+        meetingHistoryList.innerHTML = '';
 
-        if (reanalyzeBtn) {
-            reanalyzeBtn.addEventListener('click', async () => {
-                if (!state.currentMeetingId) {
-                    alert('Please select a meeting session first.');
-                    return;
-                }
-                const lang = insightsLanguageSelect ? insightsLanguageSelect.value : 'English';
-                reanalyzeBtn.disabled = true;
-                reanalyzeBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Translating...';
-
-                try {
-                    const res = await fetch(`/api/meetings/${state.currentMeetingId}/reanalyze`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ language: lang })
-                    });
-                    const data = await res.json();
-
-                    if (data.status === 'success') {
-                        await loadMeetings();
-                        await loadTasks();
-                        switchMeetingSession(state.currentMeetingId);
-                    } else {
-                        alert('Translation failed: ' + (data.detail || 'Error'));
-                    }
-                } catch (e) {
-                    alert('Error during translation: ' + e);
-                } finally {
-                    reanalyzeBtn.disabled = false;
-                    reanalyzeBtn.innerHTML = '<i data-lucide="refresh-cw"></i> Translate / Regenerate';
-                    lucide.createIcons();
-                }
-            });
-        }
-
-        transcriptSearchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            const segments = document.querySelectorAll('.transcript-segment');
-            segments.forEach(seg => {
-                const text = seg.textContent.toLowerCase();
-                seg.style.display = text.includes(query) ? 'block' : 'none';
-            });
-        });
-
-        const deleteAllMeetingsBtn = document.getElementById('deleteAllMeetingsBtn');
-        if (deleteAllMeetingsBtn) {
-            deleteAllMeetingsBtn.addEventListener('click', async () => {
-                if (confirm('⚠️ Are you sure you want to DELETE ALL meeting sessions, transcripts, audio recordings, and extracted action tasks?\n\nThis action CANNOT be undone!')) {
-                    try {
-                        const res = await fetch('/api/meetings_all', { method: 'DELETE' });
-                        const data = await res.json();
-                        alert(data.message || 'All meetings deleted.');
-                        state.currentMeetingId = null;
-                        await loadMeetings();
-                        await loadTasks();
-                    } catch (e) {
-                        alert('Error deleting all meetings: ' + e);
-                    }
-                }
-            });
-        }
-
-        // Copy Handlers
-        const copySummaryBtn = document.getElementById('copySummaryBtn');
-        const copyInsightsTasksBtn = document.getElementById('copyInsightsTasksBtn');
-        const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
-        const copyAllInsightsBtn = document.getElementById('copyAllInsightsBtn');
-
-        if (copySummaryBtn) {
-            copySummaryBtn.addEventListener('click', () => {
-                const meeting = state.meetings.find(m => m.id === state.currentMeetingId);
-                const text = meeting ? meeting.summary : (summaryContent ? summaryContent.innerText : '');
-                copyToClipboard(text, 'Executive Summary copied to clipboard!');
-            });
-        }
-
-        if (copyInsightsTasksBtn) {
-            copyInsightsTasksBtn.addEventListener('click', () => {
-                const meetingTasks = state.tasks.filter(t => t.meeting_id === state.currentMeetingId);
-                if (meetingTasks.length === 0) {
-                    alert('No action tasks available to copy.');
-                    return;
-                }
-                const formattedTasks = meetingTasks.map((t, idx) => {
-                    let taskStr = `${idx + 1}. [${t.priority || 'Medium'}] ${t.title}\n   Description: ${t.description || 'N/A'}\n   Assignee: ${t.assignee || 'Unassigned'} | Due: ${t.due_date || 'N/A'}`;
-                    if (t.subtasks && t.subtasks.length > 0) {
-                        taskStr += '\n   Subtasks:\n' + t.subtasks.map(st => `     - [${st.completed ? 'X' : ' '}] ${st.title}`).join('\n');
-                    }
-                    return taskStr;
-                }).join('\n\n');
-                copyToClipboard(formattedTasks, 'Extracted Action Tasks copied to clipboard!');
-            });
-        }
-
-        if (copyTranscriptBtn) {
-            copyTranscriptBtn.addEventListener('click', () => {
-                const meeting = state.meetings.find(m => m.id === state.currentMeetingId);
-                let text = '';
-                if (meeting && meeting.transcript) {
-                    text = meeting.transcript;
-                } else if (transcriptContainer) {
-                    text = transcriptContainer.innerText;
-                }
-                copyToClipboard(text, 'Full Meeting Transcript copied to clipboard!');
-            });
-        }
-
-        if (copyAllInsightsBtn) {
-            copyAllInsightsBtn.addEventListener('click', () => {
-                const meeting = state.meetings.find(m => m.id === state.currentMeetingId);
-                if (!meeting) {
-                    alert('Please select a meeting session first.');
-                    return;
-                }
-                const meetingTasks = state.tasks.filter(t => t.meeting_id === state.currentMeetingId);
-                let fullReport = `=========================================\nMEETING REPORT: ${meeting.title || 'Live Session'}\nDate: ${new Date(meeting.timestamp * 1000).toLocaleString()}\nLanguage: ${meeting.language || 'English'}\n=========================================\n\n--- EXECUTIVE SUMMARY ---\n${meeting.summary || 'N/A'}\n\n`;
-
-                fullReport += `--- ITEMS & TOPICS DISCUSSED ---\n`;
-                if (meeting.items_discussed && meeting.items_discussed.length > 0) {
-                    meeting.items_discussed.forEach(item => {
-                        fullReport += `• ${item.topic}: ${item.details}\n`;
-                    });
-                } else {
-                    fullReport += `No specific topics extracted.\n`;
-                }
-
-                fullReport += `\n--- EXTRACTED ACTION TASKS (${meetingTasks.length}) ---\n`;
-                if (meetingTasks.length > 0) {
-                    meetingTasks.forEach((t, idx) => {
-                        fullReport += `${idx + 1}. [${t.priority || 'Medium'}] ${t.title}\n   Description: ${t.description || 'N/A'}\n   Assignee: ${t.assignee || 'Unassigned'} | Due: ${t.due_date || 'N/A'}\n`;
-                    });
-                } else {
-                    fullReport += `No action tasks extracted.\n`;
-                }
-
-                fullReport += `\n--- FULL TRANSCRIPT ---\n${meeting.transcript || 'No transcript available.'}\n`;
-                copyToClipboard(fullReport, 'Full Session Intelligence copied to clipboard!');
-            });
-        }
-
-        const expandChatReportBtn = document.getElementById('expandChatReportBtn');
-        const fullScreenChatModal = document.getElementById('fullScreenChatModal');
-        const closeFullScreenChatModalBtn = document.getElementById('closeFullScreenChatModalBtn');
-        const copyModalReportBtn = document.getElementById('copyModalReportBtn');
-
-        if (expandChatReportBtn && fullScreenChatModal) {
-            expandChatReportBtn.addEventListener('click', () => {
-                const richHtml = document.getElementById('insightsFormattedReportHtml').innerHTML;
-                document.getElementById('modalFormattedReportHtml').innerHTML = richHtml;
-                fullScreenChatModal.classList.remove('hidden');
-                lucide.createIcons();
-            });
-        }
-
-        if (closeFullScreenChatModalBtn && fullScreenChatModal) {
-            closeFullScreenChatModalBtn.addEventListener('click', () => fullScreenChatModal.classList.add('hidden'));
-        }
-
-        if (copyModalReportBtn) {
-            copyModalReportBtn.addEventListener('click', () => {
-                const txt = document.getElementById('insightsFormattedReportText').value;
-                copyToClipboard(txt, 'Formatted AI Chat Assistant Description copied to clipboard!');
-            });
-        }
-
-        const viewRichReportTab = document.getElementById('viewRichReportTab');
-        const viewTextReportTab = document.getElementById('viewTextReportTab');
-        const richReportContainer = document.getElementById('richReportContainer');
-        const textReportContainer = document.getElementById('textReportContainer');
-
-        if (viewRichReportTab && viewTextReportTab) {
-            viewRichReportTab.addEventListener('click', () => {
-                viewRichReportTab.classList.add('active');
-                viewTextReportTab.classList.remove('active');
-                if (richReportContainer) richReportContainer.classList.remove('hidden');
-                if (textReportContainer) textReportContainer.classList.add('hidden');
-            });
-            viewTextReportTab.addEventListener('click', () => {
-                viewTextReportTab.classList.add('active');
-                viewRichReportTab.classList.remove('active');
-                if (textReportContainer) textReportContainer.classList.remove('hidden');
-                if (richReportContainer) richReportContainer.classList.add('hidden');
-            });
-        }
-
-        const copyInsightsReportBtn = document.getElementById('copyInsightsReportBtn');
-        if (copyInsightsReportBtn) {
-            copyInsightsReportBtn.addEventListener('click', () => {
-                const txt = document.getElementById('insightsFormattedReportText').value;
-                copyToClipboard(txt, 'Formatted AI Chat Assistant Description copied to clipboard!');
-            });
-        }
-
-        const copyInsightsPromptBtn = document.getElementById('copyInsightsPromptBtn');
-        if (copyInsightsPromptBtn) {
-            copyInsightsPromptBtn.addEventListener('click', () => {
-                const txt = document.getElementById('insightsPromptText').value;
-                copyToClipboard(txt, 'AI Chat Prompt Payload copied to clipboard!');
-            });
-        }
-
-        const copyInsightsCurlBtn = document.getElementById('copyInsightsCurlBtn');
-        if (copyInsightsCurlBtn) {
-            copyInsightsCurlBtn.addEventListener('click', () => {
-                const txt = document.getElementById('insightsCurlText').value;
-                copyToClipboard(txt, 'Executable cURL Command copied to clipboard!');
-            });
-        }
-
-        const copyInsightsRawResponseBtn = document.getElementById('copyInsightsRawResponseBtn');
-        if (copyInsightsRawResponseBtn) {
-            copyInsightsRawResponseBtn.addEventListener('click', () => {
-                const txt = document.getElementById('insightsRawResponseText').value;
-                copyToClipboard(txt, 'Decoded Raw AI Response Payload copied to clipboard!');
-            });
-        }
-    }
-
-    function copyToClipboard(text, successMsg) {
-        if (!text || text.trim() === '') {
-            alert('Nothing to copy!');
+        if (state.meetings.length === 0) {
+            meetingHistoryList.innerHTML = '<div class="empty-state">No recorded meetings yet.</div>';
             return;
         }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(() => {
-                alert(`✅ ${successMsg || 'Copied to clipboard!'}`);
-            }).catch(() => {
-                fallbackCopyText(text, successMsg);
-            });
-        } else {
-            fallbackCopyText(text, successMsg);
-        }
-    }
 
-    function fallbackCopyText(text, successMsg) {
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-            document.execCommand('copy');
-            alert(`✅ ${successMsg || 'Copied to clipboard!'}`);
-        } catch (err) {
-            alert('Failed to copy text.');
-        }
-        document.body.removeChild(textarea);
-    }
-
-    function switchMeetingSession(meetingId) {
-        state.currentMeetingId = meetingId;
-        if (meetingSessionSelect) {
-            meetingSessionSelect.value = meetingId;
-        }
-        const meeting = state.meetings.find(m => m.id === meetingId);
-
-        if (!meeting) return;
-
-        if (insightsLanguageSelect) {
-            insightsLanguageSelect.value = meeting.language || 'English';
-        }
-        if (summaryLangBadge) {
-            summaryLangBadge.textContent = 'Language: ' + (meeting.language || 'English');
-        }
-
-        // Executive Summary
-        if (summaryContent) {
-            if (meeting.summary) {
-                const formattedSummary = escapeHtml(meeting.summary).replace(/\n/g, '<br>');
-                summaryContent.innerHTML = formattedSummary;
-            } else {
-                summaryContent.innerHTML = '<em>Summary not available for this session.</em>';
-            }
-        }
-
-        // Items Discussed
-        if (itemsDiscussedContainer) {
-            itemsDiscussedContainer.innerHTML = '';
-            if (meeting.items_discussed && meeting.items_discussed.length > 0) {
-                meeting.items_discussed.forEach(item => {
-                    const card = document.createElement('div');
-                    card.className = 'item-topic-card';
-                    const formattedDetails = escapeHtml(item.details || '').replace(/\n/g, '<br>');
-                    card.innerHTML = `
-                        <div class="item-topic-title" style="font-weight: 600;"><i data-lucide="tag" style="width: 14px; height: 14px; margin-right: 6px; color: var(--accent-cyan);"></i> ${escapeHtml(item.topic || 'Discussion Topic')}</div>
-                        <div class="item-topic-details margin-top-5">${formattedDetails}</div>
-                    `;
-                    itemsDiscussedContainer.appendChild(card);
-                });
-            } else {
-                itemsDiscussedContainer.innerHTML = '<p class="empty-state">No discussion items extracted.</p>';
-            }
-        }
-
-        // Action Items for selected meeting
-        const meetingTasks = state.tasks.filter(t => t.meeting_id === meetingId);
-        const insightsTasksContainer = document.getElementById('insightsTasksContainer');
-        const insightsTaskCount = document.getElementById('insightsTaskCount');
-
-        if (insightsTaskCount) insightsTaskCount.textContent = `${meetingTasks.length} Actions`;
-        if (insightsTasksContainer) {
-            insightsTasksContainer.innerHTML = '';
-            if (meetingTasks.length > 0) {
-                meetingTasks.forEach(t => {
-                    const card = document.createElement('div');
-                    card.className = 'item-topic-card';
-                    const pClass = (t.priority || 'Medium').toLowerCase();
-                    card.innerHTML = `
-                        <div class="flex-between">
-                            <div class="item-topic-title" style="font-weight: 600;"><i data-lucide="check-circle-2" style="color: var(--accent-cyan); width: 16px; height: 16px; display: inline-block; vertical-align: middle;"></i> ${escapeHtml(t.title)}</div>
-                            <span class="badge badge-${pClass}">${escapeHtml(t.priority || 'Medium')}</span>
-                        </div>
-                        <div class="item-topic-details margin-top-5">${escapeHtml(t.description || '')}</div>
-                        <div class="flex-between margin-top-10" style="font-size: 0.8rem; color: var(--text-muted);">
-                            <span>👤 Assignee: <strong>${escapeHtml(t.assignee || 'Unassigned')}</strong></span>
-                            <span>📅 Due: <strong>${escapeHtml(t.due_date || 'Pending')}</strong></span>
-                        </div>
-                    `;
-                    insightsTasksContainer.appendChild(card);
-                });
-            } else {
-                insightsTasksContainer.innerHTML = '<p class="empty-state">No action items extracted for this session.</p>';
-            }
-        }
-
-        // Audio Player
-        if (meetingAudioPlayer) {
-            if (meeting.audio_url) {
-                meetingAudioPlayer.src = meeting.audio_url;
-            } else {
-                meetingAudioPlayer.removeAttribute('src');
-            }
-        }
-
-        // Transcript
-        if (transcriptContainer) {
-            transcriptContainer.innerHTML = '';
-            if (meeting.segments && meeting.segments.length > 0) {
-                meeting.segments.forEach(seg => {
-                    const div = document.createElement('div');
-                    div.className = 'transcript-segment';
-                    div.innerHTML = `
-                        <div class="segment-meta">
-                            <span class="speaker-badge">${escapeHtml(seg.speaker || 'Speaker')}</span> • ${seg.start} - ${seg.end}
-                        </div>
-                        <div>${escapeHtml(seg.text || '')}</div>
-                    `;
-                    transcriptContainer.appendChild(div);
-                });
-            } else if (meeting.transcript) {
-                transcriptContainer.innerHTML = `<div class="transcript-segment">${escapeHtml(meeting.transcript)}</div>`;
-            } else {
-                transcriptContainer.innerHTML = '<p class="empty-state">No transcript data.</p>';
-            }
-        }
-
-        // AI Prompt Payload, cURL Command & Decoded Raw AI Response
-        const insightsPromptText = document.getElementById('insightsPromptText');
-        const insightsCurlText = document.getElementById('insightsCurlText');
-        const insightsRawResponseText = document.getElementById('insightsRawResponseText');
-
-        if (insightsPromptText) {
-            insightsPromptText.value = meeting.prompt || `Analyze the following meeting transcript for '${meeting.title}':\n\n${meeting.transcript || 'No transcript text available.'}`;
-        }
-
-        if (insightsCurlText) {
-            let curlStr = meeting.curl_command;
-            if (!curlStr) {
-                const payload = {
-                    prompt: meeting.prompt || `Analyze the following meeting transcript for '${meeting.title}':\n\n${meeting.transcript || ''}`,
-                    model: 'Gemini 3.6 Flash (High)'
-                };
-                curlStr = `curl -X POST "http://localhost:3005/api/v1/ai/chat" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(payload, null, 2)}'`;
-            }
-            insightsCurlText.value = curlStr;
-        }
-
-        if (insightsRawResponseText) {
-            let rawStr = meeting.response_raw || '';
-            if (!rawStr) {
-                rawStr = JSON.stringify({
-                    summary: meeting.summary,
-                    items_discussed: meeting.items_discussed || [],
-                    tasks: meetingTasks.map(t => ({
-                        title: t.title,
-                        description: t.description,
-                        assignee: t.assignee,
-                        priority: t.priority,
-                        category: t.category,
-                        due_date: t.due_date,
-                        subtasks: t.subtasks || []
-                    }))
-                }, null, 2);
-            }
-            insightsRawResponseText.value = rawStr;
-        }
-
-        // Formatted AI Chat Assistant Description Report
-        const insightsFormattedReportText = document.getElementById('insightsFormattedReportText');
-        if (insightsFormattedReportText) {
-            let chatReport = `🤖 AI CHAT ASSISTANT - MEETING INTELLIGENCE REPORT\n`;
-            chatReport += `=========================================================\n`;
-            chatReport += `📌 Meeting Title : ${meeting.title || 'Live Meeting Session'}\n`;
-            chatReport += `📅 Date Recorded : ${meeting.created_at || 'Recent Session'}\n`;
-            chatReport += `🗣️ Target Language: ${meeting.language || 'English'}\n`;
-            chatReport += `=========================================================\n\n`;
-
-            chatReport += `📝 EXECUTIVE SUMMARY:\n`;
-            chatReport += `${meeting.summary || 'No summary generated for this session.'}\n\n`;
-
-            chatReport += `💬 ITEMS & TOPICS DISCUSSED (${meeting.items_discussed ? meeting.items_discussed.length : 0}):\n`;
-            if (meeting.items_discussed && meeting.items_discussed.length > 0) {
-                meeting.items_discussed.forEach((item, idx) => {
-                    chatReport += `${idx + 1}. [${item.category || 'Topic'}] ${item.topic || 'Discussion Point'}\n`;
-                    chatReport += `   • Details: ${item.details || 'N/A'}\n\n`;
-                });
-            } else {
-                chatReport += `• No specific discussion topics extracted.\n\n`;
-            }
-
-            chatReport += `✅ EXTRACTED ACTION TASKS & MILESTONES (${meetingTasks.length}):\n`;
-            if (meetingTasks.length > 0) {
-                meetingTasks.forEach((t, idx) => {
-                    chatReport += `${idx + 1}. 🎯 ${t.title}\n`;
-                    chatReport += `   • Priority  : [${(t.priority || 'Medium').toUpperCase()}]\n`;
-                    chatReport += `   • Assignee  : ${t.assignee || 'Unassigned'}\n`;
-                    chatReport += `   • Category  : ${t.category || 'Follow-up'}\n`;
-                    chatReport += `   • Due Date  : ${t.due_date || 'Pending'}\n`;
-                    if (t.description) chatReport += `   • Details   : ${t.description}\n`;
-                    if (t.subtasks && t.subtasks.length > 0) {
-                        chatReport += `   • Subtasks  :\n`;
-                        t.subtasks.forEach(st => {
-                            const titleStr = typeof st === 'string' ? st : (st.title || 'Subtask');
-                            const isDone = typeof st === 'object' && st.completed ? '[x]' : '[ ]';
-                            chatReport += `     ${isDone} ${titleStr}\n`;
-                        });
-                    }
-                    chatReport += `\n`;
-                });
-            } else {
-                chatReport += `• No action items extracted for this meeting session.\n\n`;
-            }
-
-            if (meeting.transcript) {
-                chatReport += `---------------------------------------------------------\n`;
-                chatReport += `🎙️ FULL TRANSCRIPT SNIPPET:\n`;
-                chatReport += `${meeting.transcript}\n`;
-            }
-
-            insightsFormattedReportText.value = chatReport;
-        }
-
-        // Render Rich HTML Version for Full Width & Full Screen Mode
-        const insightsFormattedReportHtml = document.getElementById('insightsFormattedReportHtml');
-        if (insightsFormattedReportHtml) {
-            let html = `
-                <div style="background: rgba(30, 41, 59, 0.4); padding: 20px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                        <h2 style="font-size: 1.3rem; font-weight: 700; color: #f8fafc; margin: 0;"><i data-lucide="sparkles" style="color: var(--accent-cyan); width: 20px; height: 20px; vertical-align: middle; margin-right: 8px;"></i> ${escapeHtml(meeting.title || 'Live Meeting Session')}</h2>
-                        <div style="display: flex; gap: 8px;">
-                            <span class="badge badge-category">${escapeHtml(meeting.created_at || 'Recent')}</span>
-                            <span class="badge badge-primary">Language: ${escapeHtml(meeting.language || 'English')}</span>
-                        </div>
-                    </div>
+        state.meetings.forEach(m => {
+            const item = document.createElement('div');
+            item.className = `history-item ${m.id === state.currentMeetingId ? 'active' : ''}`;
+            item.innerHTML = `
+                <div class="history-item-header">
+                    <h4>${escapeHtml(m.title)}</h4>
+                    <span class="badge badge-sm">${escapeHtml(m.language || 'EN')}</span>
                 </div>
-
-                <div style="margin-bottom: 25px;">
-                    <h3 style="font-size: 1.1rem; color: #38bdf8; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;"><i data-lucide="file-text" style="width: 18px; height: 18px;"></i> Executive Summary</h3>
-                    <div style="background: rgba(15, 23, 42, 0.6); padding: 18px; border-radius: 10px; border-left: 4px solid #38bdf8; color: #e2e8f0; font-size: 0.98rem; line-height: 1.6;">
-                        ${escapeHtml(meeting.summary || 'No summary available.')}
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 25px;">
-                    <h3 style="font-size: 1.1rem; color: #c084fc; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"><i data-lucide="list-checks" style="width: 18px; height: 18px;"></i> Key Topics & Items Discussed (${meeting.items_discussed ? meeting.items_discussed.length : 0})</h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
-            `;
-
-            if (meeting.items_discussed && meeting.items_discussed.length > 0) {
-                meeting.items_discussed.forEach((item, idx) => {
-                    html += `
-                        <div style="background: rgba(15, 23, 42, 0.6); padding: 16px; border-radius: 10px; border: 1px solid rgba(192, 132, 252, 0.2);">
-                            <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; margin-bottom: 6px;"><i data-lucide="tag" style="width: 14px; height: 14px; color: #c084fc; margin-right: 6px;"></i> ${escapeHtml(item.topic || 'Topic')}</div>
-                            <div style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.5;">${escapeHtml(item.details || '')}</div>
-                        </div>
-                    `;
-                });
-            } else {
-                html += `<div style="color: #94a3b8; font-style: italic;">No specific discussion topics extracted.</div>`;
-            }
-
-            html += `
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 25px;">
-                    <h3 style="font-size: 1.1rem; color: #4ade80; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"><i data-lucide="check-square" style="width: 18px; height: 18px;"></i> Extracted Action Items & Milestones (${meetingTasks.length})</h3>
-                    <div style="display: flex; flex-direction: column; gap: 12px;">
-            `;
-
-            if (meetingTasks.length > 0) {
-                meetingTasks.forEach((t, idx) => {
-                    const pClass = (t.priority || 'Medium').toLowerCase();
-                    html += `
-                        <div style="background: rgba(15, 23, 42, 0.6); padding: 16px; border-radius: 10px; border: 1px solid rgba(74, 222, 128, 0.2);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 6px;">
-                                <div style="font-weight: 600; color: #f8fafc; font-size: 1rem;"><i data-lucide="target" style="width: 16px; height: 16px; color: #4ade80; margin-right: 8px; vertical-align: middle;"></i> ${escapeHtml(t.title)}</div>
-                                <span class="badge badge-${pClass}">${escapeHtml(t.priority || 'Medium')}</span>
-                            </div>
-                            <div style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 8px;">${escapeHtml(t.description || '')}</div>
-                            <div style="display: flex; gap: 20px; font-size: 0.82rem; color: #94a3b8;">
-                                <span>👤 Assignee: <strong style="color: #e2e8f0;">${escapeHtml(t.assignee || 'Unassigned')}</strong></span>
-                                <span>📅 Due: <strong style="color: #e2e8f0;">${escapeHtml(t.due_date || 'Pending')}</strong></span>
-                            </div>
-                        </div>
-                    `;
-                });
-            } else {
-                html += `<div style="color: #94a3b8; font-style: italic;">No action items extracted for this meeting session.</div>`;
-            }
-
-            html += `
-                    </div>
+                <div class="history-item-meta">
+                    <span><i data-lucide="clock"></i> ${escapeHtml(m.created_at || 'Just now')}</span>
+                    <span><i data-lucide="check-square"></i> ${m.task_count || 0} Tasks</span>
                 </div>
             `;
-
-            insightsFormattedReportHtml.innerHTML = html;
-        }
-
+            item.addEventListener('click', () => switchMeetingSession(m.id));
+            meetingHistoryList.appendChild(item);
+        });
         lucide.createIcons();
     }
 
-    function renderHistoryList() {
-        historyListContainer.innerHTML = '';
-        state.meetings.forEach(m => {
-            const card = document.createElement('div');
-            card.className = 'glass-card history-item-card';
-            card.innerHTML = `
-                <div class="flex-between">
+    function switchMeetingSession(id) {
+        state.currentMeetingId = id;
+        renderMeetingHistory();
+        renderMeetingDetails(id);
+    }
+
+    function renderMeetingDetails(id) {
+        if (!meetingDetailsContainer) return;
+        const meeting = state.meetings.find(m => m.id === id);
+        if (!meeting) {
+            meetingDetailsContainer.innerHTML = '<div class="empty-state">Select a meeting session from the sidebar history to view insights.</div>';
+            return;
+        }
+
+        const tasksForMeeting = state.tasks.filter(t => t.meeting_id === id);
+
+        meetingDetailsContainer.innerHTML = `
+            <div class="glass-card">
+                <div class="card-header flex-between">
                     <div>
-                        <h3>${escapeHtml(m.title)}</h3>
-                        <span class="segment-meta">${m.created_at} • ${m.task_count || 0} Action Tasks</span>
+                        <h2>${escapeHtml(meeting.title)}</h2>
+                        <p style="color: var(--text-muted); font-size: 13px;">Recorded: ${escapeHtml(meeting.created_at || 'Recently')}</p>
                     </div>
-                    <div>
-                        <button class="btn btn-sm btn-outline view-meeting-btn" data-id="${m.id}"><i data-lucide="eye"></i> View</button>
-                        <button class="btn btn-sm btn-danger delete-meeting-btn" data-id="${m.id}"><i data-lucide="trash-2"></i></button>
+                    <button class="btn btn-danger btn-sm" id="deleteMeetingBtn"><i data-lucide="trash-2"></i> Delete Session</button>
+                </div>
+
+                ${meeting.audio_url ? `
+                    <div style="margin: 16px 0;">
+                        <audio controls style="width: 100%;">
+                            <source src="${escapeHtml(meeting.audio_url)}" type="audio/wav">
+                        </audio>
+                    </div>
+                ` : ''}
+
+                <div class="section-block">
+                    <h3><i data-lucide="file-text"></i> Executive Summary</h3>
+                    <div class="summary-box">${escapeHtml(meeting.summary || 'No summary available.')}</div>
+                </div>
+
+                <div class="section-block margin-top-20">
+                    <h3><i data-lucide="check-square"></i> Extracted Action Tasks (${tasksForMeeting.length})</h3>
+                    <div class="task-list-simple">
+                        ${tasksForMeeting.length > 0 ? tasksForMeeting.map(t => `
+                            <div class="task-card-mini priority-${(t.priority || 'medium').toLowerCase()}">
+                                <strong>${escapeHtml(t.title)}</strong>
+                                <span>Assignee: ${escapeHtml(t.assignee || 'Unassigned')} | Due: ${escapeHtml(t.due_date || 'N/A')}</span>
+                            </div>
+                        `).join('') : '<p class="text-muted">No action items extracted for this session.</p>'}
                     </div>
                 </div>
-            `;
-            historyListContainer.appendChild(card);
-        });
 
-        document.querySelectorAll('.view-meeting-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = btn.getAttribute('data-id');
-                switchMeetingSession(id);
-                document.querySelector('[data-tab="insightsTab"]').click();
-            });
-        });
+                <div class="section-block margin-top-20">
+                    <h3><i data-lucide="align-left"></i> Full Transcript</h3>
+                    <div class="transcript-box">${escapeHtml(meeting.transcript || 'No transcript text available.')}</div>
+                </div>
+            </div>
+        `;
 
-        document.querySelectorAll('.delete-meeting-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                const id = btn.getAttribute('data-id');
-                if (confirm('Delete this meeting recording and its associated action tasks?')) {
+        document.getElementById('deleteMeetingBtn').addEventListener('click', async () => {
+            if (confirm(`Are you sure you want to delete "${meeting.title}"?`)) {
+                try {
                     await fetch(`/api/meetings/${id}`, { method: 'DELETE' });
+                    state.currentMeetingId = null;
                     await loadMeetings();
                     await loadTasks();
+                } catch (e) {
+                    alert('Error deleting meeting: ' + e);
                 }
-            });
+            }
         });
+
         lucide.createIcons();
     }
 
-    // --- Task Board (Kanban) ---
+    // --- Action Tasks Data Loading ---
     async function loadTasks() {
         try {
             const res = await fetch('/api/tasks');
             state.tasks = await res.json();
-            totalTasksCount.textContent = `${state.tasks.length} Tasks`;
             renderTaskBoard();
         } catch (e) {
             console.error('Error loading tasks:', e);
         }
     }
 
-    function setupTaskBoardEvents() {
-        taskSearchInput.addEventListener('input', renderTaskBoard);
-        priorityFilter.addEventListener('change', renderTaskBoard);
-        statusFilter.addEventListener('change', renderTaskBoard);
-
-        exportBtn.addEventListener('click', () => {
-            exportMenu.classList.toggle('hidden');
-        });
-
-        document.getElementById('exportMdBtn').addEventListener('click', () => exportData('markdown'));
-        document.getElementById('exportCsvBtn').addEventListener('click', () => exportData('csv'));
-        document.getElementById('exportJsonBtn').addEventListener('click', () => exportData('json'));
-
-        openNewTaskBtn.addEventListener('click', () => {
-            document.getElementById('taskIdInput').value = '';
-            document.getElementById('taskTitleInput').value = '';
-            document.getElementById('taskDescInput').value = '';
-            document.getElementById('taskAssigneeInput').value = 'Unassigned';
-            document.getElementById('taskPriorityInput').value = 'Medium';
-            document.getElementById('taskCategoryInput').value = 'Follow-up';
-            document.getElementById('taskDueDateInput').value = 'Next Week';
-            document.getElementById('modalTitle').textContent = 'Add Action Task';
-            taskModal.classList.remove('hidden');
-        });
-    }
-
     function renderTaskBoard() {
-        const searchQuery = taskSearchInput.value.toLowerCase();
-        const priorityVal = priorityFilter.value;
-        const statusVal = statusFilter.value;
+        if (!taskKanbanBoard) return;
+        taskKanbanBoard.innerHTML = '';
 
-        const filtered = state.tasks.filter(t => {
-            const matchesSearch = t.title.toLowerCase().includes(searchQuery) || (t.description || '').toLowerCase().includes(searchQuery);
-            const matchesPriority = priorityVal === 'all' || t.priority === priorityVal;
-            const matchesStatus = statusVal === 'all' || t.status === statusVal;
-            return matchesSearch && matchesPriority && matchesStatus;
-        });
+        const statuses = ['todo', 'in_progress', 'completed'];
+        const statusTitles = { 'todo': '📋 To Do', 'in_progress': '⏳ In Progress', 'completed': '✅ Completed' };
 
-        todoTaskList.innerHTML = '';
-        progressTaskList.innerHTML = '';
-        completedTaskList.innerHTML = '';
-
-        let todoCnt = 0, progCnt = 0, compCnt = 0;
-
-        filtered.forEach(task => {
-            const card = createTaskCard(task);
-            if (task.status === 'in_progress') {
-                progressTaskList.appendChild(card);
-                progCnt++;
-            } else if (task.status === 'completed') {
-                completedTaskList.appendChild(card);
-                compCnt++;
-            } else {
-                todoTaskList.appendChild(card);
-                todoCnt++;
-            }
-        });
-
-        todoCount.textContent = todoCnt;
-        progressCount.textContent = progCnt;
-        completedCount.textContent = compCnt;
-        lucide.createIcons();
-    }
-
-    function createTaskCard(task) {
-        const div = document.createElement('div');
-        div.className = 'task-card';
-        const pClass = (task.priority || 'Medium').toLowerCase();
-
-        div.innerHTML = `
-            <div class="task-badges">
-                <span class="badge badge-${pClass}">${escapeHtml(task.priority || 'Medium')}</span>
-                <span class="badge badge-category">${escapeHtml(task.category || 'Task')}</span>
-            </div>
-            <div class="task-title">${escapeHtml(task.title)}</div>
-            <div class="task-desc">${escapeHtml(task.description || '')}</div>
-            <div class="task-footer">
-                <span class="task-assignee"><i data-lucide="user"></i> ${escapeHtml(task.assignee || 'Unassigned')}</span>
-                <span><i data-lucide="calendar"></i> ${escapeHtml(task.due_date || 'Pending')}</span>
-            </div>
-            <div class="flex-between margin-top-15">
-                <select class="custom-select select-sm status-toggle-select" data-id="${task.id}">
-                    <option value="todo" ${task.status === 'todo' ? 'selected' : ''}>To Do</option>
-                    <option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
-                    <option value="completed" ${task.status === 'completed' ? 'selected' : ''}>Completed</option>
-                </select>
-                <div>
-                    <button class="icon-btn edit-task-btn" data-id="${task.id}"><i data-lucide="edit-3"></i></button>
-                    <button class="icon-btn delete-task-btn" data-id="${task.id}"><i data-lucide="trash-2"></i></button>
+        statuses.forEach(st => {
+            const tasksInCol = state.tasks.filter(t => (t.status || 'todo') === st);
+            const col = document.createElement('div');
+            col.className = 'kanban-column glass-card';
+            col.innerHTML = `
+                <div class="column-header">
+                    <h3>${statusTitles[st]} (${tasksInCol.length})</h3>
                 </div>
-            </div>
-        `;
-
-        // Event listeners
-        const statusSelect = div.querySelector('.status-toggle-select');
-        statusSelect.addEventListener('change', async (e) => {
-            const newStatus = e.target.value;
-            await fetch(`/api/tasks/${task.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status: newStatus })
-            });
-            await loadTasks();
+                <div class="column-tasks">
+                    ${tasksInCol.map(t => `
+                        <div class="kanban-task-card priority-${(t.priority || 'medium').toLowerCase()}" data-id="${t.id}">
+                            <div class="task-title">${escapeHtml(t.title)}</div>
+                            <div class="task-meta">
+                                <span>👤 ${escapeHtml(t.assignee || 'Unassigned')}</span>
+                                <span>📅 ${escapeHtml(t.due_date || 'No Date')}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            taskKanbanBoard.appendChild(col);
         });
-
-        div.querySelector('.edit-task-btn').addEventListener('click', () => {
-            document.getElementById('taskIdInput').value = task.id;
-            document.getElementById('taskTitleInput').value = task.title;
-            document.getElementById('taskDescInput').value = task.description || '';
-            document.getElementById('taskAssigneeInput').value = task.assignee || 'Unassigned';
-            document.getElementById('taskPriorityInput').value = task.priority || 'Medium';
-            document.getElementById('taskCategoryInput').value = task.category || 'Follow-up';
-            document.getElementById('taskDueDateInput').value = task.due_date || 'Next Week';
-            document.getElementById('modalTitle').textContent = 'Edit Action Task';
-            taskModal.classList.remove('hidden');
-        });
-
-        div.querySelector('.delete-task-btn').addEventListener('click', async () => {
-            if (confirm('Delete this action task?')) {
-                await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' });
-                await loadTasks();
-            }
-        });
-
-        return div;
     }
 
-    // --- Modal Events ---
-    function setupModalEvents() {
-        closeTaskModalBtn.addEventListener('click', () => taskModal.classList.add('hidden'));
-        cancelTaskModalBtn.addEventListener('click', () => taskModal.classList.add('hidden'));
-
-        taskForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const id = document.getElementById('taskIdInput').value;
-            const payload = {
-                title: document.getElementById('taskTitleInput').value,
-                description: document.getElementById('taskDescInput').value,
-                assignee: document.getElementById('taskAssigneeInput').value,
-                priority: document.getElementById('taskPriorityInput').value,
-                category: document.getElementById('taskCategoryInput').value,
-                due_date: document.getElementById('taskDueDateInput').value
-            };
-
-            if (id) {
-                await fetch(`/api/tasks/${id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            } else {
-                await fetch('/api/tasks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-            }
-
-            taskModal.classList.add('hidden');
-            await loadTasks();
-        });
-
-        openSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
-        closeSettingsModalBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
-
-        const autoInstallOllamaBtn = document.getElementById('autoInstallOllamaBtn');
-        const ollamaProgressContainer = document.getElementById('ollamaProgressContainer');
-        const ollamaStatusBadge = document.getElementById('ollamaStatusBadge');
-        const ollamaPercentText = document.getElementById('ollamaPercentText');
-        const ollamaProgressFill = document.getElementById('ollamaProgressFill');
-        const ollamaStatusMsg = document.getElementById('ollamaStatusMsg');
-
-        let ollamaPollInterval = null;
-
-        if (autoInstallOllamaBtn) {
-            autoInstallOllamaBtn.addEventListener('click', async () => {
-                autoInstallOllamaBtn.disabled = true;
-                autoInstallOllamaBtn.innerHTML = '<i data-lucide="loader" class="spin"></i> Setting up...';
-                if (ollamaProgressContainer) ollamaProgressContainer.classList.remove('hidden');
+    function setupTaskBoardEvents() {
+        if (addTaskBtn) {
+            addTaskBtn.addEventListener('click', async () => {
+                const title = prompt('Enter Action Task Title:');
+                if (!title) return;
+                const assignee = prompt('Assignee Name:', 'Alex') || 'Alex';
 
                 try {
-                    const formData = new FormData();
-                    formData.append('model_name', 'llama3.2');
-                    await fetch('/api/ollama/setup', { method: 'POST', body: formData });
-
-                    if (ollamaPollInterval) clearInterval(ollamaPollInterval);
-                    ollamaPollInterval = setInterval(async () => {
-                        try {
-                            const pRes = await fetch('/api/ollama/progress');
-                            const pData = await pRes.json();
-
-                            const pct = pData.percent || 0;
-                            const st = pData.status || 'downloading';
-                            const msg = pData.message || 'Processing setup...';
-
-                            if (ollamaPercentText) ollamaPercentText.textContent = `${pct}%`;
-                            if (ollamaProgressFill) ollamaProgressFill.style.width = `${pct}%`;
-                            if (ollamaStatusMsg) ollamaStatusMsg.textContent = msg;
-
-                            if (ollamaStatusBadge) {
-                                if (st === 'ready') {
-                                    ollamaStatusBadge.textContent = '✅ Ready';
-                                    ollamaStatusBadge.className = 'badge badge-success';
-                                    clearInterval(ollamaPollInterval);
-                                    autoInstallOllamaBtn.disabled = false;
-                                    autoInstallOllamaBtn.innerHTML = '<i data-lucide="check"></i> Ollama Active';
-                                } else if (st === 'error') {
-                                    ollamaStatusBadge.textContent = '❌ Setup Error';
-                                    ollamaStatusBadge.className = 'badge badge-danger';
-                                    clearInterval(ollamaPollInterval);
-                                    autoInstallOllamaBtn.disabled = false;
-                                    autoInstallOllamaBtn.innerHTML = '<i data-lucide="download-cloud"></i> Retry Auto-Install';
-                                } else {
-                                    ollamaStatusBadge.textContent = st.toUpperCase();
-                                    ollamaStatusBadge.className = 'badge badge-primary';
-                                }
-                            }
-                            lucide.createIcons();
-                        } catch (err) {
-                            console.error(err);
-                        }
-                    }, 1000);
+                    await fetch('/api/tasks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            title,
+                            assignee,
+                            priority: 'High',
+                            status: 'todo'
+                        })
+                    });
+                    await loadTasks();
                 } catch (e) {
-                    alert('Ollama auto-setup error: ' + e);
-                    autoInstallOllamaBtn.disabled = false;
-                    autoInstallOllamaBtn.innerHTML = '<i data-lucide="download-cloud"></i> Auto-Install / Start Ollama';
+                    alert('Error adding task: ' + e);
                 }
             });
         }
+    }
 
-        saveSettingsBtn.addEventListener('click', async () => {
-            const provider = document.getElementById('aiProviderSelect').value;
-            const geminiKey = document.getElementById('geminiApiKeyInput').value.trim();
-            const groqKey = document.getElementById('groqApiKeyInput').value.trim();
-            const openaiKey = document.getElementById('openaiApiKeyInput').value.trim();
-            const ollamaHost = document.getElementById('ollamaHostInput').value.trim();
-            const yogeshChatHost = document.getElementById('yogeshChatHostInput').value.trim();
+    function setupInsightsEvents() {}
 
-            await fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    ai_provider: provider,
-                    gemini_api_key: geminiKey,
-                    groq_api_key: groqKey,
-                    openai_api_key: openaiKey,
-                    ollama_host: ollamaHost,
-                    yogesh_chat_host: yogeshChatHost
-                })
+    // --- AI Audit Logs ---
+    async function loadAiLogs() {
+        if (!aiLogsTableBody) return;
+        try {
+            const res = await fetch('/api/ai/logs');
+            state.aiLogs = await res.json();
+
+            aiLogsTableBody.innerHTML = '';
+            if (state.aiLogs.length === 0) {
+                aiLogsTableBody.innerHTML = '<tr><td colspan="6" class="text-center">No AI audit logs recorded yet.</td></tr>';
+                return;
+            }
+
+            state.aiLogs.forEach(log => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(log.timestamp || 'N/A')}</td>
+                    <td><span class="badge badge-info">${escapeHtml(log.provider || 'AI Engine')}</span></td>
+                    <td><strong>${escapeHtml(log.meeting_title || 'Session')}</strong></td>
+                    <td>${log.duration_ms ? log.duration_ms + ' ms' : 'N/A'}</td>
+                    <td><span class="badge badge-success">${escapeHtml(log.status || 'OK')}</span></td>
+                    <td><button class="btn btn-secondary btn-xs view-log-btn" data-id="${log.id}">Inspect Payload</button></td>
+                `;
+                aiLogsTableBody.appendChild(tr);
             });
-            settingsModal.classList.add('hidden');
-            alert('Settings & AI Provider preferences saved successfully!');
+
+            document.querySelectorAll('.view-log-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const id = e.target.getAttribute('data-id');
+                    const log = state.aiLogs.find(l => String(l.id) === String(id));
+                    if (log) showLogModal(log);
+                });
+            });
+        } catch (e) {
+            console.error('Error loading AI logs:', e);
+        }
+    }
+
+    function setupAiLogsEvents() {
+        if (refreshLogsBtn) refreshLogsBtn.addEventListener('click', loadAiLogs);
+        if (clearLogsBtn) {
+            clearLogsBtn.addEventListener('click', async () => {
+                if (confirm('Clear all AI audit execution logs?')) {
+                    try {
+                        await fetch('/api/ai/logs', { method: 'DELETE' });
+                        await loadAiLogs();
+                    } catch (e) {
+                        alert('Error clearing logs: ' + e);
+                    }
+                }
+            });
+        }
+    }
+
+    function showLogModal(log) {
+        if (!viewLogModal || !logModalContent) return;
+        logModalContent.innerHTML = `
+            <h3>AI Audit Log #${log.id}</h3>
+            <p><strong>Provider:</strong> ${escapeHtml(log.provider)}</p>
+            <p><strong>Endpoint:</strong> <code>${escapeHtml(log.endpoint)}</code></p>
+            <hr style="border-color: rgba(255,255,255,0.1); margin: 12px 0;">
+            <h4>Prompt Sent:</h4>
+            <pre class="code-block">${escapeHtml(log.prompt || 'N/A')}</pre>
+            <h4>cURL Command:</h4>
+            <pre class="code-block">${escapeHtml(log.curl_command || 'N/A')}</pre>
+            <h4>Raw Response Output:</h4>
+            <pre class="code-block">${escapeHtml(log.response_raw || 'N/A')}</pre>
+        `;
+        viewLogModal.classList.remove('hidden');
+    }
+
+    function setupModalEvents() {
+        if (closeLogModalBtn && viewLogModal) {
+            closeLogModalBtn.addEventListener('click', () => viewLogModal.classList.add('hidden'));
+        }
+        if (openSettingsBtn && settingsModal) {
+            openSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+        }
+        if (closeSettingsModalBtn && settingsModal) {
+            closeSettingsModalBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        }
+        if (saveSettingsBtn) {
+            saveSettingsBtn.addEventListener('click', async () => {
+                const ai_provider = document.getElementById('aiProviderSelect').value;
+                const gemini_api_key = document.getElementById('geminiApiKeyInput').value;
+                const groq_api_key = document.getElementById('groqApiKeyInput').value;
+
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ai_provider, gemini_api_key, groq_api_key })
+                    });
+                    alert('Settings updated successfully!');
+                    settingsModal.classList.add('hidden');
+                } catch (e) {
+                    alert('Error saving settings: ' + e);
+                }
+            });
+        }
+    }
+
+    // --- Background Jobs Modal ---
+    function setupJobsEvents() {}
+
+    function startJobsPolling() {
+        if (state.jobsPollInterval) clearInterval(state.jobsPollInterval);
+        state.jobsPollInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/jobs');
+                const jobs = await res.json();
+                renderJobsModal(jobs);
+            } catch (e) {
+                console.error(e);
+            }
+        }, 2000);
+    }
+
+    function renderJobsModal(jobs) {
+        const container = document.getElementById('bgJobsList');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!jobs || jobs.length === 0) {
+            container.innerHTML = '<p class="text-muted">No background jobs active.</p>';
+            return;
+        }
+
+        jobs.forEach(j => {
+            const div = document.createElement('div');
+            div.className = 'job-item glass-card margin-top-10';
+            div.innerHTML = `
+                <div class="flex-between">
+                    <strong>${escapeHtml(j.meeting_title || 'Background Session')}</strong>
+                    <span class="badge badge-info">${escapeHtml(j.stage)}</span>
+                </div>
+                <div class="progress-bar-container margin-top-10">
+                    <div class="progress-bar" style="width: ${j.progress || 0}%"></div>
+                </div>
+                <p style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">${escapeHtml(j.status_message || '')}</p>
+            `;
+            container.appendChild(div);
         });
     }
 
@@ -1718,364 +912,23 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/settings');
             const data = await res.json();
-            if (data.ai_provider) {
-                const sel = document.getElementById('aiProviderSelect');
-                if (sel) sel.value = data.ai_provider;
-            }
-            if (data.gemini_api_key) {
-                const gInput = document.getElementById('geminiApiKeyInput');
-                if (gInput) gInput.value = data.gemini_api_key;
-            }
-            if (data.groq_api_key) {
-                const grInput = document.getElementById('groqApiKeyInput');
-                if (grInput) grInput.value = data.groq_api_key;
-            }
-            if (data.openai_api_key) {
-                const oInput = document.getElementById('openaiApiKeyInput');
-                if (oInput) oInput.value = data.openai_api_key;
-            }
-            if (data.ollama_host) {
-                const olInput = document.getElementById('ollamaHostInput');
-                if (olInput) olInput.value = data.ollama_host;
-            }
-            if (data.yogesh_chat_host) {
-                const ycInput = document.getElementById('yogeshChatHostInput');
-                if (ycInput) ycInput.value = data.yogesh_chat_host;
+            if (data) {
+                if (data.ai_provider) document.getElementById('aiProviderSelect').value = data.ai_provider;
+                if (data.gemini_api_key) document.getElementById('geminiApiKeyInput').value = data.gemini_api_key;
+                if (data.groq_api_key) document.getElementById('groqApiKeyInput').value = data.groq_api_key;
             }
         } catch (e) {
-            console.error(e);
+            console.error('Error loading settings:', e);
         }
-    }
-
-    // --- Export Options ---
-    function exportData(format) {
-        exportMenu.classList.add('hidden');
-        if (state.tasks.length === 0) {
-            alert('No tasks to export.');
-            return;
-        }
-
-        if (format === 'json') {
-            downloadFile(JSON.stringify(state.tasks, null, 2), 'meeting_action_tasks.json', 'application/json');
-        } else if (format === 'csv') {
-            let csv = 'ID,Title,Assignee,Priority,Category,Status,DueDate\n';
-            state.tasks.forEach(t => {
-                csv += `"${t.id}","${escapeCsv(t.title)}","${escapeCsv(t.assignee)}","${t.priority}","${t.category}","${t.status}","${t.due_date}"\n`;
-            });
-            downloadFile(csv, 'meeting_action_tasks.csv', 'text/csv');
-        } else if (format === 'markdown') {
-            let md = '# Meeting Action Items & Tasks\n\n';
-            state.tasks.forEach(t => {
-                md += `### [${t.status.toUpperCase()}] ${t.title}\n`;
-                md += `- **Assignee:** ${t.assignee}\n`;
-                md += `- **Priority:** ${t.priority}\n`;
-                md += `- **Category:** ${t.category}\n`;
-                md += `- **Due Date:** ${t.due_date}\n`;
-                md += `- **Description:** ${t.description || 'N/A'}\n\n`;
-            });
-            downloadFile(md, 'meeting_action_items.md', 'text/markdown');
-        }
-    }
-
-    function downloadFile(content, filename, contentType) {
-        const blob = new Blob([content], { type: contentType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-    }
-
-    // --- Background Processing Jobs Monitor ---
-    function setupJobsEvents() {
-        const openBgJobsBtn = document.getElementById('openBgJobsBtn');
-        const bgJobsModal = document.getElementById('bgJobsModal');
-        const closeBgJobsModalBtn = document.getElementById('closeBgJobsModalBtn');
-        const closeBgJobsFooterBtn = document.getElementById('closeBgJobsFooterBtn');
-
-        if (openBgJobsBtn && bgJobsModal) {
-            openBgJobsBtn.addEventListener('click', () => {
-                bgJobsModal.classList.remove('hidden');
-                loadJobs();
-            });
-        }
-
-        if (closeBgJobsModalBtn && bgJobsModal) {
-            closeBgJobsModalBtn.addEventListener('click', () => bgJobsModal.classList.add('hidden'));
-        }
-        if (closeBgJobsFooterBtn && bgJobsModal) {
-            closeBgJobsFooterBtn.addEventListener('click', () => bgJobsModal.classList.add('hidden'));
-        }
-
-        startJobsPolling();
-    }
-
-    function startJobsPolling() {
-        if (state.jobsPollInterval) return;
-        loadJobs();
-        state.jobsPollInterval = setInterval(loadJobs, 1500);
-    }
-
-    async function loadJobs() {
-        try {
-            const res = await fetch('/api/jobs');
-            const jobs = await res.json();
-
-            const bgJobsBadge = document.getElementById('bgJobsBadge');
-            const bgJobsListContainer = document.getElementById('bgJobsListContainer');
-
-            const activeJobs = jobs.filter(j => j.stage !== 'completed' && j.stage !== 'error');
-            
-            if (bgJobsBadge) {
-                bgJobsBadge.textContent = `${activeJobs.length} Running`;
-                bgJobsBadge.style.background = activeJobs.length > 0 ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255, 255, 255, 0.1)';
-                bgJobsBadge.style.color = activeJobs.length > 0 ? '#60a5fa' : '#94a3b8';
-            }
-
-            if (!state.processedJobIds) state.processedJobIds = new Set();
-
-            let hasNewCompletion = false;
-            let newlyCompletedMeetingId = null;
-
-            jobs.forEach(j => {
-                if (j.stage === 'completed' && !state.processedJobIds.has(j.id)) {
-                    state.processedJobIds.add(j.id);
-                    hasNewCompletion = true;
-                    if (j.meeting_id) newlyCompletedMeetingId = j.meeting_id;
-                }
-            });
-
-            if (hasNewCompletion || activeJobs.length > 0) {
-                await loadAiLogs();
-            }
-
-            if (hasNewCompletion) {
-                await loadMeetings(true);
-                await loadTasks();
-                if (newlyCompletedMeetingId) {
-                    state.currentMeetingId = newlyCompletedMeetingId;
-                    switchMeetingSession(newlyCompletedMeetingId);
-                }
-            }
-
-            if (!bgJobsListContainer) return;
-
-            if (jobs.length === 0) {
-                bgJobsListContainer.innerHTML = '<p class="empty-state">No background processing tasks active.</p>';
-                return;
-            }
-
-            bgJobsListContainer.innerHTML = '';
-            jobs.forEach(j => {
-                const card = document.createElement('div');
-                card.className = 'item-topic-card';
-                card.style.marginBottom = '10px';
-                
-                let badgeClass = 'badge-primary';
-                if (j.stage === 'completed') badgeClass = 'badge-success';
-                else if (j.stage === 'error') badgeClass = 'badge-danger';
-                else if (j.stage === 'transcribing' || j.stage === 'analyzing') badgeClass = 'badge-category';
-
-                card.innerHTML = `
-                    <div class="flex-between">
-                        <div style="font-weight: 600; color: #f8fafc;"><i data-lucide="cpu" style="width: 15px; height: 15px; vertical-align: middle; margin-right: 6px; color: var(--accent-cyan);"></i> ${escapeHtml(j.meeting_title || 'Session')}</div>
-                        <span class="badge ${badgeClass}">${j.stage.toUpperCase()}</span>
-                    </div>
-                    <div class="margin-top-5 help-text" style="color: #cbd5e1; font-size: 0.85rem;">${escapeHtml(j.status_message || '')}</div>
-                    <div class="progress-bar-track" style="background: rgba(255,255,255,0.1); height: 6px; border-radius: 3px; overflow: hidden; margin-top: 8px;">
-                        <div class="progress-bar-fill" style="width: ${j.progress || 0}%; height: 100%; background: linear-gradient(90deg, #38bdf8, #c084fc); transition: width 0.3s ease;"></div>
-                    </div>
-                `;
-                bgJobsListContainer.appendChild(card);
-            });
-            lucide.createIcons();
-        } catch (e) {
-            console.error('loadJobs notice:', e);
-        }
-    }
-
-    // --- AI Logs Audit Inspector ---
-    let currentAiLogs = [];
-    let aiLogsPollInterval = null;
-
-    function setupAiLogsEvents() {
-        const aiLogsTabBtn = document.querySelector('.nav-tab[data-tab="aiLogsTab"]');
-        if (aiLogsTabBtn) {
-            aiLogsTabBtn.addEventListener('click', () => {
-                activateTab('aiLogsTab');
-                loadAiLogs();
-            });
-        }
-
-        // Auto-refresh logs every 2 seconds when AI Logs Audit tab is active
-        if (aiLogsPollInterval) clearInterval(aiLogsPollInterval);
-        aiLogsPollInterval = setInterval(() => {
-            if (state.activeTab === 'aiLogsTab') {
-                loadAiLogs();
-            }
-        }, 2000);
-
-        const clearAiLogsBtn = document.getElementById('clearAiLogsBtn');
-        if (clearAiLogsBtn) {
-            clearAiLogsBtn.addEventListener('click', async () => {
-                if (!confirm('Are you sure you want to clear all stored AI request & response logs?')) return;
-                try {
-                    await fetch('/api/ai/logs', { method: 'DELETE' });
-                    loadAiLogs();
-                } catch (e) {
-                    alert('Failed to clear logs: ' + (e.message || e));
-                }
-            });
-        }
-
-        const aiLogsSearchInput = document.getElementById('aiLogsSearchInput');
-        if (aiLogsSearchInput) {
-            aiLogsSearchInput.addEventListener('input', () => {
-                renderAiLogsTable(aiLogsSearchInput.value.trim().toLowerCase());
-            });
-        }
-
-        const closeAiLogDetailModalBtn = document.getElementById('closeAiLogDetailModalBtn');
-        const closeAiLogDetailFooterBtn = document.getElementById('closeAiLogDetailFooterBtn');
-        const aiLogDetailModal = document.getElementById('aiLogDetailModal');
-
-        if (closeAiLogDetailModalBtn && aiLogDetailModal) {
-            closeAiLogDetailModalBtn.addEventListener('click', () => aiLogDetailModal.classList.add('hidden'));
-        }
-        if (closeAiLogDetailFooterBtn && aiLogDetailModal) {
-            closeAiLogDetailFooterBtn.addEventListener('click', () => aiLogDetailModal.classList.add('hidden'));
-        }
-
-        const copyAiCurlBtn = document.getElementById('copyAiCurlBtn');
-        if (copyAiCurlBtn) {
-            copyAiCurlBtn.addEventListener('click', () => {
-                const txt = document.getElementById('logModalCurlTextarea').value;
-                navigator.clipboard.writeText(txt);
-                alert('Copied executable cURL command to clipboard!');
-            });
-        }
-
-        const copyAiPromptBtn = document.getElementById('copyAiPromptBtn');
-        if (copyAiPromptBtn) {
-            copyAiPromptBtn.addEventListener('click', () => {
-                const txt = document.getElementById('logModalPromptTextarea').value;
-                navigator.clipboard.writeText(txt);
-                alert('Copied AI prompt to clipboard!');
-            });
-        }
-
-        const copyAiResponseBtn = document.getElementById('copyAiResponseBtn');
-        if (copyAiResponseBtn) {
-            copyAiResponseBtn.addEventListener('click', () => {
-                const txt = document.getElementById('logModalResponseTextarea').value;
-                navigator.clipboard.writeText(txt);
-                alert('Copied AI raw response to clipboard!');
-            });
-        }
-    }
-
-    async function loadAiLogs() {
-        const tableBody = document.getElementById('aiLogsTableBody');
-        if (!tableBody) return;
-        try {
-            const res = await fetch('/api/ai/logs');
-            currentAiLogs = await res.json();
-            renderAiLogsTable();
-        } catch (e) {
-            console.error('loadAiLogs error:', e);
-        }
-    }
-
-    function renderAiLogsTable(filterQuery = '') {
-        const tableBody = document.getElementById('aiLogsTableBody');
-        if (!tableBody) return;
-        tableBody.innerHTML = '';
-
-        const filtered = currentAiLogs.filter(log => {
-            if (!filterQuery) return true;
-            return (log.provider || '').toLowerCase().includes(filterQuery) ||
-                   (log.meeting_title || '').toLowerCase().includes(filterQuery) ||
-                   (log.endpoint || '').toLowerCase().includes(filterQuery) ||
-                   (log.prompt || '').toLowerCase().includes(filterQuery);
-        });
-
-        if (filtered.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="7" class="empty-state" style="text-align: center; padding: 30px;">No AI request/response logs found. Run a meeting recording or analysis to view payload logs.</td></tr>`;
-            return;
-        }
-
-        filtered.forEach(log => {
-            const tr = document.createElement('tr');
-            tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
-            
-            const badgeClass = log.status === 'success' ? 'badge-success' : 'badge-category';
-            const latencyStr = log.duration_ms ? `${log.duration_ms} ms` : 'N/A';
-            const endpointStr = log.endpoint || 'http://localhost:3005/api/v1/ai/chat';
-
-            tr.innerHTML = `
-                <td style="padding: 12px; font-size: 0.85rem; color: #cbd5e1; font-family: monospace;">${escapeHtml(log.timestamp || '')}</td>
-                <td style="padding: 12px;"><span class="badge badge-primary"><i data-lucide="cpu" style="width: 13px; height: 13px; vertical-align: middle; margin-right: 4px;"></i> ${escapeHtml(log.provider || 'AI Engine')}</span></td>
-                <td style="padding: 12px; font-size: 0.82rem; color: #38bdf8; font-family: monospace;">${escapeHtml(endpointStr)}</td>
-                <td style="padding: 12px; font-weight: 600; color: #f8fafc;">${escapeHtml(log.meeting_title || 'Session')}</td>
-                <td style="padding: 12px; font-size: 0.85rem; color: #cbd5e1; font-family: monospace;">${latencyStr}</td>
-                <td style="padding: 12px;"><span class="badge ${badgeClass}">${escapeHtml(log.status || 'OK')}</span></td>
-                <td style="padding: 12px; text-align: right;">
-                    <button class="btn btn-secondary btn-xs view-log-payload-btn" data-id="${log.id}">
-                        <i data-lucide="eye"></i> Inspect Prompt & cURL
-                    </button>
-                </td>
-            `;
-
-            const viewBtn = tr.querySelector('.view-log-payload-btn');
-            if (viewBtn) {
-                viewBtn.addEventListener('click', () => openAiLogModal(log));
-            }
-
-            tableBody.appendChild(tr);
-        });
-
-        lucide.createIcons();
-    }
-
-    function openAiLogModal(log) {
-        const modal = document.getElementById('aiLogDetailModal');
-        if (!modal) return;
-
-        const endpoint = log.endpoint || 'http://localhost:3005/api/v1/ai/chat';
-        const httpMethod = log.http_method || 'POST';
-
-        document.getElementById('logModalProviderBadge').textContent = log.provider || 'AI Engine';
-        document.getElementById('logModalTitleText').textContent = log.meeting_title || 'Meeting Session';
-        document.getElementById('logModalMetaText').textContent = `${log.timestamp || ''} • ${log.duration_ms ? log.duration_ms + 'ms' : ''} • ${log.target_language || 'English'}`;
-
-        document.getElementById('logModalMethodBadge').textContent = httpMethod;
-        document.getElementById('logModalEndpointInput').value = endpoint;
-
-        let curlCmd = log.curl_command;
-        if (!curlCmd) {
-            const payload = { prompt: log.prompt || '', model: 'Gemini 3.6 Flash (High)' };
-            curlCmd = `curl -X ${httpMethod} "${endpoint}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(payload, null, 2)}'`;
-        }
-        document.getElementById('logModalCurlTextarea').value = curlCmd;
-
-        document.getElementById('logModalPromptTextarea').value = log.prompt || 'No prompt payload available.';
-        
-        let replyDisplay = log.response_raw || '';
-        if (!replyDisplay && log.parsed_output) {
-            replyDisplay = JSON.stringify(log.parsed_output, null, 2);
-        }
-        document.getElementById('logModalResponseTextarea').value = replyDisplay || 'No response payload available.';
-
-        modal.classList.remove('hidden');
-        lucide.createIcons();
     }
 
     function escapeHtml(str) {
-        return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
-
-    function escapeCsv(str) {
-        return (str || '').replace(/"/g, '""');
-    }
-});
+})();
