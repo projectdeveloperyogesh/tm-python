@@ -555,13 +555,19 @@ class MeetingAnalyzer:
 
             if response.status_code == 200:
                 data = response.json()
-                reply_text = data.get("reply", "")
-                
-                clean_json_str = reply_text.strip()
+                reply_text = data.get("reply") or data.get("response") or data.get("content") or data.get("message") or data.get("data") or ""
+                if not reply_text and isinstance(data, str):
+                    reply_text = data
+
+                clean_json_str = str(reply_text).strip()
                 if "```" in clean_json_str:
                     clean_json_str = re.sub(r'^```(?:json)?\s*', '', clean_json_str, flags=re.MULTILINE)
                     clean_json_str = re.sub(r'\s*```$', '', clean_json_str, flags=re.MULTILINE)
-                
+
+                json_match = re.search(r'\{[\s\S]*\}', clean_json_str)
+                if json_match:
+                    clean_json_str = json_match.group(0)
+
                 json_payload_str = json.dumps(payload, indent=2, ensure_ascii=False)
                 curl_cmd = f'curl -X POST "{url}" \\\n  -H "Content-Type: application/json" \\\n  -d \'{json_payload_str}\''
 
@@ -575,25 +581,32 @@ class MeetingAnalyzer:
                     return enriched
                 except Exception as json_err:
                     print(f"JSON Parse Error in Yogesh Chat response: {json_err}")
+                    
+                    sum_match = re.search(r'(?:Summary|Executive Summary|Executive Summary:)\s*\n?([\s\S]*?)(?=\n\n|\n[A-Z][a-z]+:|$)', str(reply_text), re.I)
+                    extracted_summary = sum_match.group(1).strip() if sum_match else str(reply_text)[:400].strip()
+
+                    bullet_lines = re.findall(r'(?:[•\-\*\d+\.]\s*)([^\n]+)', str(reply_text))
+                    items = [{"topic": "Discussion Highlight", "details": f" • {b.strip()}", "category": "Technical"} for b in bullet_lines[:6]]
+
                     fallback_res = {
-                        "summary": reply_text[:500],
-                        "items_discussed": [{"topic": "Meeting Notes", "details": reply_text, "category": "AI Output"}],
+                        "summary": extracted_summary or f"Recorded meeting session for {meeting_title}.",
+                        "items_discussed": items if items else [{"topic": "Meeting Notes", "details": f" • {str(reply_text)[:200]}", "category": "AI Notes"}],
                         "tasks": [{
                             "id": str(uuid.uuid4())[:8],
-                            "title": f"Follow-up on {meeting_title}",
-                            "description": "Review generated meeting notes.",
+                            "title": f"Action Task: Follow-up on {meeting_title}",
+                            "description": "Review generated meeting AI notes and complete assigned action items.",
                             "assignee": "Team",
                             "priority": "Medium",
                             "category": "Follow-up",
                             "due_date": "Tomorrow",
                             "status": "todo",
-                            "subtasks": []
+                            "subtasks": [{"id": "sub_1", "title": "Review action items", "completed": False}]
                         }],
                         "prompt": prompt,
                         "curl_command": curl_cmd,
                         "response_raw": reply_text
                     }
-                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "partial_json_fallback", endpoint=url, http_method="POST", payload_dict=payload)
+                    self._record_ai_log("Yogesh Chat (Port 3005)", meeting_title, target_language, prompt, reply_text, fallback_res, duration_ms, "formatted_text_fallback", endpoint=url, http_method="POST", payload_dict=payload)
                     return fallback_res
         except Exception as e:
             print(f"Yogesh Chat API (Port 3005) error: {e}")
