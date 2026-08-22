@@ -543,14 +543,14 @@ class MeetingAnalyzer:
                 else:
                     url += "/api/v1/ai/chat"
 
-            prompt = self._get_analysis_prompt(transcript_text, target_language) + f"\n\nMeeting Title: {meeting_title}\n\nTranscript:\n{transcript_text}"
+            prompt = f"Analyze the following meeting transcript for '{meeting_title}' and give list of action items, executive summary, and key discussion points in {target_language}.\n\nCRITICAL REQUIREMENT:\nProvide a detailed list of actionable tasks, executive summary, and discussion highlights.\n\nMeeting Title: {meeting_title}\n\nTranscript:\n{transcript_text}"
             
             payload = {
                 "prompt": prompt,
                 "model": "Gemini 3.6 Flash (High)"
             }
             
-            response = requests.post(url, json=payload, timeout=25)
+            response = requests.post(url, json=payload, timeout=45)
             duration_ms = int((time.time() - t0) * 1000)
 
             if response.status_code == 200:
@@ -582,37 +582,48 @@ class MeetingAnalyzer:
                 except Exception as json_err:
                     print(f"JSON Parse Error in Yogesh Chat response: {json_err}")
                     
-                    # Smart Section Parser for Yogesh Chat Markdown AI Responses
-                    sections = re.split(r'###\s*\d*\.?\s*', str(reply_text))
-                    summary_parts = []
-                    items = []
-                    
-                    for sec in sections:
-                        sec_clean = sec.strip()
-                        if not sec_clean:
-                            continue
-                        header_line = sec_clean.split('\n')[0].replace('**', '').replace(':', '').strip()
-                        
-                        if any(w in header_line.lower() for w in ['conclusion', 'observation', 'summary', 'overview', 'recommendation']):
-                            summary_parts.append(sec_clean)
-                            
-                        bullets = re.findall(r'(?:[\*\-\•]\s*)([^\n]+)', sec_clean)
-                        for b in bullets:
-                            b_clean = b.replace('*', '').replace('`', '').replace('•', '').strip()
-                            if b_clean and len(b_clean) > 5:
-                                items.append({
-                                    "topic": header_line if len(header_line) < 40 else "Meeting Highlight",
-                                    "details": f" • {b_clean}",
-                                    "category": "Technical"
-                                })
-                                
-                    full_summary = "\n\n".join(summary_parts) if summary_parts else str(reply_text)[:500]
+                    # Smart Section & Task Parser for Yogesh Chat Markdown AI Responses
+                    intro_match = re.split(r'###|\-\-\-', str(reply_text))
+                    summary = intro_match[0].strip() if intro_match else str(reply_text)[:400]
 
-                    fallback_res = {
-                        "summary": full_summary or f"Recorded meeting session for {meeting_title}.",
-                        "items_discussed": items[:10] if items else [{"topic": "Meeting Notes", "details": f" • {str(reply_text)[:200]}", "category": "AI Notes"}],
-                        "tasks": [{
-                            "id": str(uuid.uuid4())[:8],
+                    task_blocks = re.split(r'(?:####|###)\s*\d*\.?\s*', str(reply_text))
+                    tasks = []
+                    items = []
+
+                    for idx, block in enumerate(task_blocks):
+                        block_clean = block.strip()
+                        if not block_clean or idx == 0:
+                            continue
+
+                        lines = block_clean.split('\n')
+                        title_line = re.sub(r'[\*\#\`:]', '', lines[0]).strip()
+                        bullets = re.findall(r'(?:[\*\-\•]\s*)([^\n]+)', block_clean)
+                        desc_parts = [re.sub(r'[\*\`]', '', b).replace('Action:', '').strip() for b in bullets if len(b) > 3]
+                        desc = ' '.join(desc_parts) if desc_parts else f"Follow-up item for {title_line}"
+
+                        if title_line and len(title_line) > 3:
+                            task_id = f"task_{idx}"
+                            tasks.append({
+                                "id": task_id,
+                                "title": title_line,
+                                "description": desc,
+                                "assignee": "Team",
+                                "priority": "High" if idx <= 2 else "Medium",
+                                "category": "Follow-up",
+                                "due_date": "Tomorrow",
+                                "status": "todo",
+                                "subtasks": [{"id": f"sub_{idx}_{i}", "title": d[:60], "completed": False} for i, d in enumerate(desc_parts[:4])]
+                            })
+
+                            items.append({
+                                "topic": title_line,
+                                "details": f" • {desc[:120]}",
+                                "category": "Discussion"
+                            })
+
+                    if not tasks:
+                        tasks.append({
+                            "id": "task_1",
                             "title": f"Follow-up & Review: {meeting_title}",
                             "description": "Review generated meeting transcript context and complete assigned action items.",
                             "assignee": "Team",
