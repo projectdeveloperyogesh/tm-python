@@ -9,7 +9,7 @@ import numpy as np
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
-# Add root directory to sys.path to access audio_recorder
+# Add root node directory to sys.path to access audio_recorder
 CLIENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(CLIENT_DIR)
 sys.path.append(PARENT_DIR)
@@ -149,7 +149,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                     server_url = agent_state.server_url
                     meeting_title = agent_state.meeting_title
                     target_language = agent_state.target_language
-                    live_text = agent_state.recorder.get_full_transcript_text()
+                    live_text = agent_state.recorder.get_full_transcript_text() if hasattr(agent_state.recorder, 'get_full_transcript_text') else ""
 
                 print(f"[LocalSoundAgent] Stopping WASAPI recording. Compiling mic + speaker audio...")
                 wav_path = None
@@ -183,6 +183,7 @@ class AgentRequestHandler(BaseHTTPRequestHandler):
                         print(f"[LocalSoundAgent] Successfully processed by server!")
                         self._json_response(200, server_data)
                     else:
+                        # Fallback try /api/upload if /api/android/upload differs
                         try:
                             f.seek(0)
                             res2 = requests.post(f"{server_url}/api/upload", files=files, data=payload, timeout=180)
